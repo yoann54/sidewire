@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sidewire</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <div class="row">
+      <button id="pause" class="btn" title="Pause/resume capture (or click in panel and press P)">⏸ Pause</button>
+      <button id="clear" class="btn" title="Clear unstarred entries">🗑 Clear</button>
+      <button id="copyAll" class="btn" title="Copy all visible URLs">⧉ Copy URLs</button>
+      <button id="exportHar" class="btn" title="Export visible entries as HAR">↓ HAR</button>
+      <span class="spacer"></span>
+      <select id="scope" title="Capture scope">
+        <option value="active">Active tab</option>
+        <option value="all">All tabs</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <input id="urlFilter" type="text" placeholder="Filter URL (substring or /regex/) — press / to focus" />
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="2">2xx</option>
+        <option value="3">3xx</option>
+        <option value="4">4xx</option>
+        <option value="5">5xx</option>
+        <option value="err">Errors</option>
+      </select>
+    </div>
+
+    <div class="row small">
+      <select id="domainFilter">
+        <option value="">All domains</option>
+      </select>
+      <label class="check"><input type="checkbox" id="starredOnly"> ★ only</label>
+      <label class="check">Slow &gt; <input type="number" id="slowThreshold" value="1000" min="0" step="100"> ms</label>
+    </div>
+
+    <details class="filters">
+      <summary>Methods &amp; types</summary>
+      <div class="chips" id="methodChips"></div>
+      <div class="chips" id="typeChips"></div>
+    </details>
+
+    <div class="row small">
+      <label class="check" title="Attach chrome.debugger to active tab to capture response bodies (yellow banner shows while attached)">
+        <input type="checkbox" id="captureBodies"> Capture response bodies (debugger)
+      </label>
+    </div>
+
+    <div class="counts"><span id="counts"></span></div>
+  </header>
+
+  <ul id="list" class="list"></ul>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
