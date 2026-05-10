@@ -22,4 +22,21 @@ The store also requires:
 
 ## Regenerating
 
-Both `icons/icon-*.png` and `store/promo-440x280.png` are produced from HTML templates rendered via headless Chrome. To regenerate, see the snippets in `/tmp/render-icon.html` and `/tmp/render-promo.html` (or commit them into the repo if you want them durable).
+Both `icons/icon-*.png` and `store/promo-440x280.png` are produced from HTML templates rendered via headless Chrome. The templates are versioned: `store/render-icon.html` and `store/render-promo.html`.
+
+```bash
+# Icons (16/32/48/128) → ../icons/
+for size in 16 32 48 128; do
+  google-chrome --headless=new --disable-gpu --hide-scrollbars \
+    --default-background-color=00000000 \
+    --window-size=$size,$size \
+    --screenshot=../icons/icon-$size.png \
+    "file://$PWD/render-icon.html"
+done
+
+# Promo tile 440x280 → ./
+google-chrome --headless=new --disable-gpu --hide-scrollbars \
+  --window-size=440,280 \
+  --screenshot=promo-440x280.png \
+  "file://$PWD/render-promo.html"
+```
