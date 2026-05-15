@@ -4,7 +4,9 @@ title: Sidewire — Privacy Policy
 
 # Sidewire — Privacy Policy
 
-_Last updated: 2026-05-10_
+_Last updated: 2026-05-15_
+
+_Applies to Sidewire version 0.2.0._
 
 Sidewire is a Chrome extension that displays the network traffic of the tabs you are actively capturing inside a side panel, as a developer tool.
 
@@ -19,7 +21,7 @@ While you have capture enabled, Sidewire reads the following from the tabs in sc
 - Request URL, method, resource type, status code, timings
 - Request and response headers
 - Request body (form data or raw, when present)
-- Response body — **only** when you explicitly enable the "Capture response bodies (debugger)" toggle, which attaches `chrome.debugger` to the active tab and displays a persistent yellow banner while attached
+- Response body — **only** when you explicitly enable the "Capture response bodies (debugger)" toggle, which attaches `chrome.debugger` to the active tab. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
 
 This is the same kind of information you would see in Chrome's built-in DevTools Network panel.
 
@@ -35,7 +37,7 @@ This is the same kind of information you would see in Chrome's built-in DevTools
 
 The only network requests Sidewire itself performs are:
 
-- The "Replay" feature, which re-fires a captured request to its **original URL** at your explicit click. The response is shown locally; it is not sent anywhere else.
+- The "Replay" and "Replay with…" features, which re-fire a captured request at your explicit click. By default the request is sent unchanged to its original URL; the "Replay with…" editor lets you modify query parameters and the request body before sending. The destination is always the original host of the captured request, and the response is shown locally — it is not sent anywhere else.
 - The "HAR export" feature, which writes a `.har` file to your local file system via the browser's download dialog.
 
 ## Permissions

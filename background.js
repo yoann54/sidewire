@@ -1,6 +1,6 @@
 const MAX_ENTRIES = 2000;
-const STORAGE_KEY = "watch-network-log";
-const STARS_KEY = "watch-network-stars";
+const STORAGE_KEY = "sidewire-log";
+const STARS_KEY = "sidewire-stars";
 
 const inflight = new Map();
 const log = [];
@@ -60,7 +60,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "watch-network") return;
+  if (port.name !== "sidewire") return;
   ports.add(port);
   port.postMessage({
     type: "snapshot",
@@ -159,8 +159,9 @@ chrome.webRequest.onBeforeRequest.addListener(
     inflight.set(d.requestId, entry);
     log.push(entry);
     while (log.length > MAX_ENTRIES) {
-      const dropped = log.shift();
-      if (starredIds.has(dropped?.id)) log.unshift(dropped);
+      const idx = log.findIndex((e) => !starredIds.has(e.id));
+      if (idx === -1) break;
+      log.splice(idx, 1);
     }
     persist();
     broadcast({ type: "add", entry });
@@ -239,7 +240,7 @@ async function attachDebugger(tabId) {
     attachedTabId = tabId;
     return true;
   } catch (e) {
-    console.warn("watch-network: debugger attach failed", e);
+    console.warn("sidewire: debugger attach failed", e);
     return false;
   }
 }

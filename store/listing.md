@@ -48,7 +48,8 @@ FEATURES
 • Copy URL, Copy as cURL, Copy as fetch, Copy all visible URLs
 • HAR export — open in DevTools, Postman, Insomnia…
 • Replay — re-fire a captured request and see the response inline
-• Optional response-body capture via chrome.debugger (a yellow banner is shown while attached)
+• Replay with… — open an inline editor to toggle/edit/add query parameters and edit the body (JSON pretty-print) before re-firing
+• Optional response-body capture via chrome.debugger (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
 • Persistence — buffer kept in chrome.storage.session, survives service-worker restarts
 • Hotkeys: / focus URL filter, Esc clear filter, P pause/resume
 
@@ -56,7 +57,7 @@ PRIVACY
 Sidewire does not send any data anywhere. Captured request/response metadata stays inside your browser's session storage and is discarded when the browser closes. No analytics, no telemetry, no remote endpoints.
 
 LIMITATIONS
-• Response bodies require enabling the chrome.debugger toggle (yellow banner appears while attached). Correlation between webRequest and CDP is by URL match, so identical concurrent requests may have their bodies attached to the wrong entry.
+• Response bodies require enabling the chrome.debugger toggle (Chrome's built-in debugger notification bar will appear on the inspected tab while attached). Correlation between webRequest and CDP is by URL match, so identical concurrent requests may have their bodies attached to the wrong entry.
 • Replay runs from the extension origin; some headers (Cookie, Origin, Host, Referer, …) are forbidden by the fetch spec and silently dropped.
 • Buffer capped at 2000 entries; oldest non-starred dropped first.
 ```
@@ -97,7 +98,7 @@ Used to persist the in-memory request buffer in chrome.storage.session so that t
 
 ### `debugger`
 ```
-Optional. Attached only when the user enables the "Capture response bodies" toggle. It is required because Chrome's webRequest API does not expose response bodies; the Chrome DevTools Protocol does. A yellow banner is displayed in the panel for as long as the debugger is attached so the user is always aware. Detached automatically when the toggle is turned off or the tab closes.
+Optional. Attached only when the user enables the "Capture response bodies" toggle. It is required because Chrome's webRequest API does not expose response bodies; the Chrome DevTools Protocol does. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when the toggle is turned off or the tab closes.
 ```
 
 ### Host permissions: `<all_urls>`

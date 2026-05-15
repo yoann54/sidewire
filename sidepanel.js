@@ -28,7 +28,9 @@ const state = {
   slowThreshold: 1000,
   methods: new Set(METHODS),
   types: new Set(DEFAULT_TYPES),
-  replays: new Map()
+  replays: new Map(),
+  replayWithOpen: new Set(),
+  replayDrafts: new Map()
 };
 
 const els = {
@@ -239,7 +241,7 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Watch Network", version: "0.1.0" },
+      creator: { name: "Sidewire", version: "0.2.0" },
       entries: entries.map(harEntry)
     }
   };
@@ -247,18 +249,20 @@ function buildHAR(entries) {
 
 // ─── replay ──────────────────────────────────────────────────────────────
 
-async function replay(e) {
-  const init = { method: e.method, headers: {}, credentials: "include" };
+async function replay(e, overrides = {}) {
+  const method = overrides.method || e.method;
+  const init = { method, headers: {}, credentials: "include" };
   for (const h of e.requestHeaders || []) {
     if (h.name.startsWith(":")) continue;
     if (FORBIDDEN_FETCH_HEADERS.has(h.name.toLowerCase())) continue;
     init.headers[h.name] = h.value ?? "";
   }
-  const body = bodyToText(e.requestBody);
-  if (body && e.method !== "GET" && e.method !== "HEAD") init.body = body;
+  const body = overrides.body != null ? overrides.body : bodyToText(e.requestBody);
+  if (body && method !== "GET" && method !== "HEAD") init.body = body;
+  const url = overrides.url || e.url;
   const start = performance.now();
   try {
-    const res = await fetch(e.url, init);
+    const res = await fetch(url, init);
     const text = await res.text();
     return {
       ok: true,
@@ -297,6 +301,126 @@ function refreshDomainOptions() {
   els.domainFilter.innerHTML = `<option value="">All domains (${hosts.length})</option>` +
     hosts.map((h) => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join("");
   els.domainFilter.value = current;
+}
+
+// ─── replay with: drafts + editor ────────────────────────────────────────
+
+function getOrInitDraft(e) {
+  let draft = state.replayDrafts.get(e.id);
+  if (draft) return draft;
+  let params = [];
+  try {
+    const u = new URL(e.url);
+    params = [...u.searchParams.entries()].map(([key, value]) => ({ key, value, enabled: true }));
+  } catch { /* unparseable url */ }
+  draft = { params, body: bodyToText(e.requestBody) };
+  state.replayDrafts.set(e.id, draft);
+  return draft;
+}
+
+function composeUrlFromDraft(e, draft) {
+  try {
+    const u = new URL(e.url);
+    u.search = "";
+    for (const p of draft.params) {
+      if (p.enabled && p.key) u.searchParams.append(p.key, p.value);
+    }
+    return u.toString();
+  } catch {
+    return e.url;
+  }
+}
+
+function buildReplayEditor(e) {
+  const draft = getOrInitDraft(e);
+  const hasBody = e.method !== "GET" && e.method !== "HEAD";
+
+  const paramsHtml = draft.params.length === 0
+    ? `<div class="kv-empty">No parameters — use + Add</div>`
+    : draft.params.map((p, i) => `
+      <div class="rw-param-row">
+        <input type="checkbox" data-rw="param-enabled" data-i="${i}" ${p.enabled ? "checked" : ""}>
+        <input type="text" data-rw="param-key" data-i="${i}" value="${escapeHtml(p.key)}" placeholder="key">
+        <input type="text" data-rw="param-value" data-i="${i}" value="${escapeHtml(p.value)}" placeholder="value">
+        <button class="mini" data-rw="param-remove" data-i="${i}" title="Remove">×</button>
+      </div>`).join("");
+
+  const bodySection = hasBody ? `
+    <div class="rw-subhead">
+      <span>Body</span>
+      <button class="mini" data-rw="body-pretty" title="Pretty-print JSON">Pretty</button>
+    </div>
+    <textarea class="rw-body" data-rw="body" rows="8" spellcheck="false">${escapeHtml(draft.body)}</textarea>
+    <div class="rw-note">Body sent as raw text. Adjust Content-Type if needed.</div>
+  ` : "";
+
+  return `
+    <section class="detail-section rw-section">
+      <header>
+        <span>Replay with…</span>
+        <button class="mini" data-rw="close" title="Close">✕</button>
+      </header>
+      <div class="detail-body">
+        <div class="rw-subhead"><span>Query parameters</span></div>
+        <div class="rw-params">${paramsHtml}</div>
+        <button class="mini" data-rw="param-add">+ Add</button>
+        ${bodySection}
+        <div class="rw-send-row">
+          <button class="mini rw-send" data-rw="send">▶ Send</button>
+        </div>
+      </div>
+    </section>`;
+}
+
+function attachReplayEditorHandlers(root, e) {
+  const draft = getOrInitDraft(e);
+
+  root.addEventListener("input", (ev) => {
+    const t = ev.target;
+    const kind = t.dataset.rw;
+    if (!kind) return;
+    if (kind === "param-key" || kind === "param-value") {
+      const i = +t.dataset.i;
+      draft.params[i][kind === "param-key" ? "key" : "value"] = t.value;
+    } else if (kind === "body") {
+      draft.body = t.value;
+    }
+  });
+
+  root.addEventListener("change", (ev) => {
+    const t = ev.target;
+    if (t.dataset.rw === "param-enabled") {
+      const i = +t.dataset.i;
+      draft.params[i].enabled = t.checked;
+    }
+  });
+
+  root.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("[data-rw]");
+    if (!t) return;
+    const kind = t.dataset.rw;
+    if (kind === "close") {
+      state.replayWithOpen.delete(e.id);
+      renderList();
+    } else if (kind === "param-add") {
+      draft.params.push({ key: "", value: "", enabled: true });
+      renderList();
+    } else if (kind === "param-remove") {
+      const i = +t.dataset.i;
+      draft.params.splice(i, 1);
+      renderList();
+    } else if (kind === "body-pretty") {
+      const pretty = tryPrettyJson(draft.body);
+      if (pretty) { draft.body = pretty; renderList(); }
+    } else if (kind === "send") {
+      state.replays.set(e.id, { pending: true });
+      renderList();
+      const url = composeUrlFromDraft(e, draft);
+      const result = await replay(e, { url, body: draft.body });
+      state.replays.set(e.id, result);
+      renderList();
+    }
+  });
 }
 
 // ─── rendering: detail panel ─────────────────────────────────────────────
@@ -378,13 +502,17 @@ function buildDetail(e) {
   const replayResult = state.replays.get(e.id);
   const replaySection = replayResult ? renderReplay(replayResult) : "";
 
+  const editorOpen = state.replayWithOpen.has(e.id);
   wrap.innerHTML = `
     <div class="detail-toolbar">
       <button class="mini" data-action="copy-url">Copy URL</button>
       <button class="mini" data-action="copy-curl">Copy as cURL</button>
       <button class="mini" data-action="copy-fetch">Copy as fetch</button>
       <button class="mini" data-action="replay">▶ Replay</button>
+      <button class="mini ${editorOpen ? "active" : ""}" data-action="replay-with">✎ Replay with…</button>
     </div>
+    ${editorOpen ? buildReplayEditor(e) : ""}
+    ${section("URL", e.url, `<div class="code">${escapeHtml(e.url)}</div>`)}
     ${section("Query parameters", queryText, kvList(queryRows))}
     ${section("Request headers", reqHeadersText, kvList((e.requestHeaders || []).map((h) => [h.name, h.value])))}
     ${reqBodySection}
@@ -410,6 +538,13 @@ function buildDetail(e) {
     state.replays.set(e.id, result);
     renderList();
   });
+  wrap.querySelector('[data-action="replay-with"]').addEventListener("click", () => {
+    if (state.replayWithOpen.has(e.id)) state.replayWithOpen.delete(e.id);
+    else state.replayWithOpen.add(e.id);
+    renderList();
+  });
+  const editor = wrap.querySelector(".rw-section");
+  if (editor) attachReplayEditorHandlers(editor, e);
   for (const btn of wrap.querySelectorAll("button.mini[data-copy]")) {
     btn.addEventListener("click", (ev) => {
       const id = btn.getAttribute("data-copy");
@@ -509,6 +644,16 @@ function renderList() {
   renderScheduled = true;
   requestAnimationFrame(() => {
     renderScheduled = false;
+    const active = document.activeElement;
+    const isTextField = active && (
+      active.tagName === "TEXTAREA" ||
+      (active.tagName === "INPUT" && (active.type === "text" || !active.type))
+    );
+    if (isTextField && active.closest(".rw-section")) {
+      renderScheduled = true;
+      setTimeout(() => { renderScheduled = false; renderList(); }, 500);
+      return;
+    }
     sectionTexts.clear();
     sectionUid = 0;
     const matcher = makeMatcher();
@@ -549,7 +694,7 @@ function upsert(entry) {
 
 // ─── port ────────────────────────────────────────────────────────────────
 
-const port = chrome.runtime.connect({ name: "watch-network" });
+const port = chrome.runtime.connect({ name: "sidewire" });
 port.onMessage.addListener((msg) => {
   if (msg.type === "snapshot") {
     state.entries = msg.entries.slice();
@@ -569,6 +714,8 @@ port.onMessage.addListener((msg) => {
     state.byId = new Map(state.entries.map((e) => [e.id, e]));
     state.expandedIds = new Set([...state.expandedIds].filter((id) => state.byId.has(id)));
     state.replays = new Map([...state.replays].filter(([id]) => state.byId.has(id)));
+    state.replayWithOpen = new Set([...state.replayWithOpen].filter((id) => state.byId.has(id)));
+    state.replayDrafts = new Map([...state.replayDrafts].filter(([id]) => state.byId.has(id)));
     renderList();
   } else if (msg.type === "starred") {
     state.starred = new Set(msg.ids || []);
@@ -637,7 +784,7 @@ els.exportHar.addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `watch-network-${new Date().toISOString().replace(/[:.]/g, "-")}.har`;
+  a.download = `sidewire-${new Date().toISOString().replace(/[:.]/g, "-")}.har`;
   a.click();
   URL.revokeObjectURL(url);
 });
