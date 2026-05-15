@@ -6,7 +6,7 @@ title: Sidewire — Privacy Policy
 
 _Last updated: 2026-05-15_
 
-_Applies to Sidewire version 0.2.0._
+_Applies to Sidewire version 0.3.0._
 
 Sidewire is a Chrome extension that displays the network traffic of the tabs you are actively capturing inside a side panel, as a developer tool.
 
@@ -28,7 +28,8 @@ This is the same kind of information you would see in Chrome's built-in DevTools
 ## What the extension stores
 
 - A rolling buffer of captured entries (capped at 2,000) is kept in `chrome.storage.session` so that the side panel survives service-worker restarts. `chrome.storage.session` is cleared automatically by Chrome when the browser closes.
-- The extension does **not** write to `chrome.storage.local` or `chrome.storage.sync`.
+- `chrome.storage.local` is used **only** to persist UI preferences (currently: theme, JWT-decoding toggle). No captured request data, headers, bodies, or URLs are written to it.
+- The extension does **not** write to `chrome.storage.sync`.
 - The extension does **not** use cookies, IndexedDB, or any other persistent client-side storage.
 
 ## What the extension transmits
@@ -47,7 +48,7 @@ The only network requests Sidewire itself performs are:
 | `webRequest` | Read request/response metadata (URL, headers, status, timings) from tabs in capture scope |
 | `sidePanel` | Render the extension's UI in Chrome's side panel |
 | `tabs` | Identify the active tab when "Active tab" scope is selected |
-| `storage` | Persist the rolling buffer in `chrome.storage.session` |
+| `storage` | Persist the rolling buffer in `chrome.storage.session` and UI preferences (theme, JWT decoding) in `chrome.storage.local` |
 | `debugger` | Optional — attached only while the "Capture response bodies" toggle is on, to read response bodies via the Chrome DevTools Protocol |
 | `<all_urls>` host access | Allow the above to observe whichever site you choose to inspect |
 

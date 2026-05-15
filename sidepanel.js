@@ -26,11 +26,13 @@ const state = {
   domainFilter: "",
   starredOnly: false,
   slowThreshold: 1000,
+  decodeJwt: false,
   methods: new Set(METHODS),
   types: new Set(DEFAULT_TYPES),
   replays: new Map(),
   replayWithOpen: new Set(),
-  replayDrafts: new Map()
+  replayDrafts: new Map(),
+  decodedBase64: new Set()
 };
 
 const els = {
@@ -41,14 +43,19 @@ const els = {
   exportHar: document.getElementById("exportHar"),
   scope: document.getElementById("scope"),
   urlFilter: document.getElementById("urlFilter"),
+  urlFilterIcon: document.getElementById("urlFilterIcon"),
+  urlFilterClear: document.getElementById("urlFilterClear"),
   statusFilter: document.getElementById("statusFilter"),
   domainFilter: document.getElementById("domainFilter"),
   starredOnly: document.getElementById("starredOnly"),
   slowThreshold: document.getElementById("slowThreshold"),
   captureBodies: document.getElementById("captureBodies"),
+  decodeJwtToggle: document.getElementById("decodeJwtToggle"),
   methodChips: document.getElementById("methodChips"),
   typeChips: document.getElementById("typeChips"),
-  counts: document.getElementById("counts")
+  counts: document.getElementById("counts"),
+  themeToggle: document.getElementById("themeToggle"),
+  empty: null
 };
 
 // ─── utilities ───────────────────────────────────────────────────────────
@@ -57,6 +64,35 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
+}
+
+const ICONS = {
+  play: '<path d="M8 5v14l11-7z"/>',
+  pause: '<path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14H7L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
+  download: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  "chevron-right": '<polyline points="9 18 15 12 9 6"/>',
+  "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+  "star-filled": '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  "star-empty": '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  pencil: '<path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+  moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>'
+};
+
+function icon(name) {
+  const path = ICONS[name];
+  if (!path) return "";
+  const filled = name === "play" || name === "pause" || name === "star-filled" || name === "sparkles" || name === "moon";
+  const fillAttr = filled ? 'fill="currentColor" stroke="none"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  return `<svg class="ico" viewBox="0 0 24 24" ${fillAttr} aria-hidden="true">${path}</svg>`;
 }
 
 function getHeader(headers, name) {
@@ -134,6 +170,44 @@ function tryPrettyJson(text) {
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
   try {
     return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+function decodeBase64Text(b64) {
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: false }).decode(bytes) };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+function decodeJwt(value) {
+  if (!value) return null;
+  const token = String(value).replace(/^Bearer\s+/i, "").trim();
+  if (!JWT_RE.test(token)) return null;
+  try {
+    const parts = token.split(".");
+    const decodeSegment = (s) => {
+      const pad = s.length % 4;
+      const padded = pad ? s + "=".repeat(4 - pad) : s;
+      const bin = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    };
+    const headerText = decodeSegment(parts[0]);
+    const payloadText = decodeSegment(parts[1]);
+    return {
+      header: tryPrettyJson(headerText) || headerText,
+      payload: tryPrettyJson(payloadText) || payloadText
+    };
   } catch {
     return null;
   }
@@ -241,7 +315,7 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Sidewire", version: "0.2.0" },
+      creator: { name: "Sidewire", version: "0.3.0" },
       entries: entries.map(harEntry)
     }
   };
@@ -278,11 +352,12 @@ async function replay(e, overrides = {}) {
 
 // ─── rendering: filters ──────────────────────────────────────────────────
 
-function renderChips(container, values, selected) {
+function renderChips(container, values, selected, kind) {
   container.innerHTML = "";
   for (const v of values) {
     const el = document.createElement("span");
-    el.className = "chip" + (selected.has(v) ? " on" : "");
+    const kindCls = kind === "method" ? ` method-chip ${v}` : "";
+    el.className = "chip" + kindCls + (selected.has(v) ? " on" : "");
     el.textContent = v;
     el.addEventListener("click", () => {
       if (selected.has(v)) selected.delete(v); else selected.add(v);
@@ -292,8 +367,53 @@ function renderChips(container, values, selected) {
     container.appendChild(el);
   }
 }
-renderChips(els.methodChips, METHODS, state.methods);
+renderChips(els.methodChips, METHODS, state.methods, "method");
 renderChips(els.typeChips, TYPES, state.types);
+
+els.clear.innerHTML = `${icon("trash")}<span>Clear</span>`;
+els.copyAll.innerHTML = `${icon("copy")}<span>Copy URLs</span>`;
+els.exportHar.innerHTML = `${icon("download")}<span>HAR</span>`;
+els.urlFilterIcon.innerHTML = icon("search");
+els.urlFilterClear.innerHTML = icon("close");
+
+// ─── persisted UI prefs (theme, jwt decode) ─────────────────────────────
+const THEME_KEY = "sidewire-theme";
+const JWT_KEY = "sidewire-decode-jwt";
+
+function applyTheme(theme) {
+  const isLight = theme === "light";
+  document.documentElement.classList.toggle("theme-light", isLight);
+  els.themeToggle.innerHTML = icon(isLight ? "moon" : "sun");
+  els.themeToggle.title = isLight ? "Switch to dark theme" : "Switch to light theme";
+}
+
+let currentTheme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+applyTheme(currentTheme);
+
+chrome.storage.local.get([THEME_KEY, JWT_KEY]).then((res) => {
+  const stored = res?.[THEME_KEY];
+  if (stored === "light" || stored === "dark") {
+    currentTheme = stored;
+    applyTheme(currentTheme);
+  }
+  if (res?.[JWT_KEY] === true) {
+    state.decodeJwt = true;
+    els.decodeJwtToggle.checked = true;
+    renderList();
+  }
+}).catch(() => {});
+
+els.themeToggle.addEventListener("click", () => {
+  currentTheme = currentTheme === "light" ? "dark" : "light";
+  applyTheme(currentTheme);
+  chrome.storage.local.set({ [THEME_KEY]: currentTheme }).catch(() => {});
+});
+
+els.decodeJwtToggle.addEventListener("change", () => {
+  state.decodeJwt = els.decodeJwtToggle.checked;
+  chrome.storage.local.set({ [JWT_KEY]: state.decodeJwt }).catch(() => {});
+  renderList();
+});
 
 function refreshDomainOptions() {
   const current = state.domainFilter;
@@ -342,13 +462,13 @@ function buildReplayEditor(e) {
         <input type="checkbox" data-rw="param-enabled" data-i="${i}" ${p.enabled ? "checked" : ""}>
         <input type="text" data-rw="param-key" data-i="${i}" value="${escapeHtml(p.key)}" placeholder="key">
         <input type="text" data-rw="param-value" data-i="${i}" value="${escapeHtml(p.value)}" placeholder="value">
-        <button class="mini" data-rw="param-remove" data-i="${i}" title="Remove">×</button>
+        <button class="mini rw-param-remove" data-rw="param-remove" data-i="${i}" title="Remove">${icon("close")}</button>
       </div>`).join("");
 
   const bodySection = hasBody ? `
     <div class="rw-subhead">
       <span>Body</span>
-      <button class="mini" data-rw="body-pretty" title="Pretty-print JSON">Pretty</button>
+      <button class="mini" data-rw="body-pretty" title="Pretty-print JSON">${icon("sparkles")}<span>Pretty</span></button>
     </div>
     <textarea class="rw-body" data-rw="body" rows="8" spellcheck="false">${escapeHtml(draft.body)}</textarea>
     <div class="rw-note">Body sent as raw text. Adjust Content-Type if needed.</div>
@@ -358,15 +478,15 @@ function buildReplayEditor(e) {
     <section class="detail-section rw-section">
       <header>
         <span>Replay with…</span>
-        <button class="mini" data-rw="close" title="Close">✕</button>
+        <button class="mini rw-close" data-rw="close" title="Close">${icon("close")}</button>
       </header>
       <div class="detail-body">
         <div class="rw-subhead"><span>Query parameters</span></div>
         <div class="rw-params">${paramsHtml}</div>
-        <button class="mini" data-rw="param-add">+ Add</button>
+        <button class="mini" data-rw="param-add">${icon("plus")}<span>Add</span></button>
         ${bodySection}
         <div class="rw-send-row">
-          <button class="mini rw-send" data-rw="send">▶ Send</button>
+          <button class="mini rw-send" data-rw="send">${icon("play")}<span>Send</span></button>
         </div>
       </div>
     </section>`;
@@ -432,17 +552,71 @@ function kvList(pairs) {
     .join("")}</dl>`;
 }
 
+function renderHeadersList(headers) {
+  if (!headers || !headers.length) return `<div class="kv-empty">—</div>`;
+  return `<dl class="kv">` + headers.map((h) => {
+    const value = h.value ?? "";
+    const jwt = state.decodeJwt ? decodeJwt(value) : null;
+    let dd = `<dd>${escapeHtml(value)}`;
+    if (jwt) {
+      dd += `
+        <div class="jwt-block">
+          <div class="jwt-label">JWT header</div>
+          <pre class="code jwt-pre">${escapeHtml(jwt.header)}</pre>
+          <div class="jwt-label">JWT payload</div>
+          <pre class="code jwt-pre">${escapeHtml(jwt.payload)}</pre>
+        </div>`;
+    }
+    dd += `</dd>`;
+    return `<dt>${escapeHtml(h.name)}</dt>${dd}`;
+  }).join("") + `</dl>`;
+}
+
 let sectionUid = 0;
 const sectionTexts = new Map();
 
 function section(title, copyValue, contentHtml) {
   const id = `sec-${++sectionUid}`;
   if (copyValue) sectionTexts.set(id, copyValue);
-  const copyBtn = copyValue ? `<button class="mini" data-copy="${id}" title="Copy">⧉</button>` : "";
+  const copyBtn = copyValue ? `<button class="mini" data-copy="${id}" title="Copy">${icon("copy")}</button>` : "";
   return `
     <section class="detail-section">
       <header><span>${escapeHtml(title)}</span>${copyBtn}</header>
       <div class="detail-body">${contentHtml}</div>
+    </section>`;
+}
+
+function renderBase64Section(e, rawText) {
+  const decoded = state.decodedBase64.has(e.id);
+  let body, copyValue, title;
+  if (decoded) {
+    const r = decodeBase64Text(rawText);
+    if (r.ok) {
+      const pretty = tryPrettyJson(r.text);
+      body = pretty || r.text;
+      copyValue = body;
+      title = "Response body · decoded";
+    } else {
+      body = `[decode error: ${r.error}]`;
+      copyValue = "";
+      title = "Response body · decode failed";
+    }
+  } else {
+    body = rawText;
+    copyValue = rawText;
+    title = "Response body (base64)";
+  }
+  const id = `sec-${++sectionUid}`;
+  if (copyValue) sectionTexts.set(id, copyValue);
+  const decodeBtn = `<button class="mini ${decoded ? "active" : ""}" data-action="toggle-base64-decode" title="Toggle base64 decoding">${decoded ? "Show raw" : "Decode"}</button>`;
+  const copyBtn = copyValue ? `<button class="mini" data-copy="${id}" title="Copy">${icon("copy")}</button>` : "";
+  return `
+    <section class="detail-section">
+      <header>
+        <span>${escapeHtml(title)}</span>
+        <span class="section-actions">${decodeBtn}${copyBtn}</span>
+      </header>
+      <div class="detail-body"><pre class="code">${escapeHtml(body)}</pre></div>
     </section>`;
 }
 
@@ -496,7 +670,7 @@ function buildDetail(e) {
     ? section("Response body", "",
         `<div class="kv-empty">${state.captureBodies ? "(not captured)" : "Enable response body capture to see this"}</div>`)
     : respIsBase64
-      ? section("Response body (base64)", respBodyText, `<pre class="code">${escapeHtml(respBodyText)}</pre>`)
+      ? renderBase64Section(e, respBodyText)
       : fmtBodySection("Response body", respBodyText, e.responseHeaders);
 
   const replayResult = state.replays.get(e.id);
@@ -505,18 +679,18 @@ function buildDetail(e) {
   const editorOpen = state.replayWithOpen.has(e.id);
   wrap.innerHTML = `
     <div class="detail-toolbar">
-      <button class="mini" data-action="copy-url">Copy URL</button>
-      <button class="mini" data-action="copy-curl">Copy as cURL</button>
-      <button class="mini" data-action="copy-fetch">Copy as fetch</button>
-      <button class="mini" data-action="replay">▶ Replay</button>
-      <button class="mini ${editorOpen ? "active" : ""}" data-action="replay-with">✎ Replay with…</button>
+      <button class="mini" data-action="copy-url">${icon("copy")}<span>Copy URL</span></button>
+      <button class="mini" data-action="copy-curl">${icon("copy")}<span>cURL</span></button>
+      <button class="mini" data-action="copy-fetch">${icon("copy")}<span>fetch</span></button>
+      <button class="mini" data-action="replay">${icon("play")}<span>Replay</span></button>
+      <button class="mini ${editorOpen ? "active" : ""}" data-action="replay-with">${icon("pencil")}<span>Replay with…</span></button>
     </div>
     ${editorOpen ? buildReplayEditor(e) : ""}
     ${section("URL", e.url, `<div class="code">${escapeHtml(e.url)}</div>`)}
     ${section("Query parameters", queryText, kvList(queryRows))}
-    ${section("Request headers", reqHeadersText, kvList((e.requestHeaders || []).map((h) => [h.name, h.value])))}
+    ${section("Request headers", reqHeadersText, renderHeadersList(e.requestHeaders))}
     ${reqBodySection}
-    ${section("Response headers", respHeadersText, kvList((e.responseHeaders || []).map((h) => [h.name, h.value])))}
+    ${section("Response headers", respHeadersText, renderHeadersList(e.responseHeaders))}
     ${respBodySection}
     ${section("Timing", "", fmtTiming(e))}
     ${replaySection}
@@ -543,6 +717,14 @@ function buildDetail(e) {
     else state.replayWithOpen.add(e.id);
     renderList();
   });
+  const decodeBtn = wrap.querySelector('[data-action="toggle-base64-decode"]');
+  if (decodeBtn) {
+    decodeBtn.addEventListener("click", () => {
+      if (state.decodedBase64.has(e.id)) state.decodedBase64.delete(e.id);
+      else state.decodedBase64.add(e.id);
+      renderList();
+    });
+  }
   const editor = wrap.querySelector(".rw-section");
   if (editor) attachReplayEditorHandlers(editor, e);
   for (const btn of wrap.querySelectorAll("button.mini[data-copy]")) {
@@ -600,18 +782,19 @@ function entryRow(e) {
   li.dataset.id = e.id;
 
   const sb = statusBucket(e);
-  const statusText = e.state === "error" ? (e.error || "ERR")
+  const statusText = e.state === "error" ? "ERR"
     : e.status != null ? e.status
     : "···";
+  const statusTitle = e.state === "error" ? (e.error || "Network error") : "";
   const op = gqlOp(e);
 
   const main = document.createElement("div");
   main.className = "row-main";
   main.innerHTML = `
-    <span class="caret">${isExpanded ? "▼" : "▶"}</span>
-    <span class="star" title="Star (kept across Clear)">${isStarred ? "★" : "☆"}</span>
+    <span class="caret">${icon(isExpanded ? "chevron-down" : "chevron-right")}</span>
+    <span class="star" title="Star (kept across Clear)">${icon(isStarred ? "star-filled" : "star-empty")}</span>
     <span class="method ${e.method}">${e.method}</span>
-    <span class="status ${sb ? "s" + sb : ""}">${escapeHtml(statusText)}</span>
+    <span class="status ${sb ? "s" + sb : ""}"${statusTitle ? ` title="${escapeHtml(statusTitle)}"` : ""}>${escapeHtml(statusText)}</span>
     <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}</span>
     <span class="duration">${e.duration != null ? e.duration + "ms" : ""}</span>
   `;
@@ -630,11 +813,30 @@ function entryRow(e) {
   });
   main.querySelector(".star").addEventListener("click", (ev) => {
     ev.stopPropagation();
-    port.postMessage({ type: "toggleStar", id: e.id });
+    safePost({ type: "toggleStar", id: e.id });
   });
 
   li.appendChild(main);
   if (isExpanded) li.appendChild(buildDetail(e));
+  return li;
+}
+
+function renderEmptyState(noEntries) {
+  const li = document.createElement("li");
+  li.className = "empty";
+  if (noEntries) {
+    li.innerHTML = `
+      <span class="empty-icon">${icon("inbox")}</span>
+      <div class="empty-title">Waiting for requests</div>
+      <div class="empty-hint">Browse a site to start capturing.<br>Press <kbd>P</kbd> to pause · <kbd>/</kbd> to filter</div>
+    `;
+  } else {
+    li.innerHTML = `
+      <span class="empty-icon">${icon("search")}</span>
+      <div class="empty-title">No matches</div>
+      <div class="empty-hint">Try clearing filters or check the methods/types section.</div>
+    `;
+  }
   return li;
 }
 
@@ -661,11 +863,15 @@ function renderList() {
     const wasAtBottom =
       els.list.scrollTop + els.list.clientHeight >= els.list.scrollHeight - 20;
     els.list.innerHTML = "";
-    const frag = document.createDocumentFragment();
-    for (const e of visible) frag.appendChild(entryRow(e));
-    els.list.appendChild(frag);
-    if (wasAtBottom && state.expandedIds.size === 0) {
-      els.list.scrollTop = els.list.scrollHeight;
+    if (visible.length === 0) {
+      els.list.appendChild(renderEmptyState(state.entries.length === 0));
+    } else {
+      const frag = document.createDocumentFragment();
+      for (const e of visible) frag.appendChild(entryRow(e));
+      els.list.appendChild(frag);
+      if (wasAtBottom && state.expandedIds.size === 0) {
+        els.list.scrollTop = els.list.scrollHeight;
+      }
     }
     els.counts.textContent =
       `${visible.length} shown · ${state.entries.length} captured · ${state.starred.size} starred` +
@@ -693,9 +899,12 @@ function upsert(entry) {
 }
 
 // ─── port ────────────────────────────────────────────────────────────────
+// The background service worker is shut down after ~30s of inactivity in MV3.
+// When that happens, our port is invalidated. We reconnect on demand.
 
-const port = chrome.runtime.connect({ name: "sidewire" });
-port.onMessage.addListener((msg) => {
+let port = null;
+
+function handlePortMessage(msg) {
   if (msg.type === "snapshot") {
     state.entries = msg.entries.slice();
     state.byId = new Map(state.entries.map((e) => [e.id, e]));
@@ -716,6 +925,7 @@ port.onMessage.addListener((msg) => {
     state.replays = new Map([...state.replays].filter(([id]) => state.byId.has(id)));
     state.replayWithOpen = new Set([...state.replayWithOpen].filter((id) => state.byId.has(id)));
     state.replayDrafts = new Map([...state.replayDrafts].filter(([id]) => state.byId.has(id)));
+    state.decodedBase64 = new Set([...state.decodedBase64].filter((id) => state.byId.has(id)));
     renderList();
   } else if (msg.type === "starred") {
     state.starred = new Set(msg.ids || []);
@@ -728,10 +938,36 @@ port.onMessage.addListener((msg) => {
     syncControls();
     renderList();
   }
-});
+}
+
+function connectPort() {
+  port = chrome.runtime.connect({ name: "sidewire" });
+  port.onMessage.addListener(handlePortMessage);
+  port.onDisconnect.addListener(() => { port = null; });
+  return port;
+}
+
+function safePost(msg) {
+  try {
+    if (!port) connectPort();
+    port.postMessage(msg);
+  } catch {
+    // port was alive but got killed between check and send — reconnect once
+    try {
+      connectPort();
+      port.postMessage(msg);
+    } catch (e) {
+      console.warn("sidewire: failed to send to background", e);
+    }
+  }
+}
+
+connectPort();
 
 function syncControls() {
-  els.pause.textContent = state.paused ? "▶ Resume" : "⏸ Pause";
+  els.pause.innerHTML = state.paused
+    ? `${icon("play")}<span>Resume</span>`
+    : `${icon("pause")}<span>Pause</span>`;
   els.pause.classList.toggle("active", state.paused);
   els.scope.value = state.scope;
   els.captureBodies.checked = state.captureBodies;
@@ -740,14 +976,22 @@ function syncControls() {
 // ─── controls ────────────────────────────────────────────────────────────
 
 els.pause.addEventListener("click", () => {
-  port.postMessage({ type: "setPaused", value: !state.paused });
+  safePost({ type: "setPaused", value: !state.paused });
 });
-els.clear.addEventListener("click", () => port.postMessage({ type: "clear" }));
+els.clear.addEventListener("click", () => safePost({ type: "clear" }));
 els.scope.addEventListener("change", () => {
-  port.postMessage({ type: "setScope", value: els.scope.value });
+  safePost({ type: "setScope", value: els.scope.value });
 });
 els.urlFilter.addEventListener("input", () => {
   state.urlFilter = els.urlFilter.value;
+  els.urlFilterClear.hidden = !els.urlFilter.value;
+  renderList();
+});
+els.urlFilterClear.addEventListener("click", () => {
+  els.urlFilter.value = "";
+  state.urlFilter = "";
+  els.urlFilterClear.hidden = true;
+  els.urlFilter.focus();
   renderList();
 });
 els.statusFilter.addEventListener("change", () => {
@@ -767,14 +1011,16 @@ els.slowThreshold.addEventListener("input", () => {
   renderList();
 });
 els.captureBodies.addEventListener("change", () => {
-  port.postMessage({ type: "setCaptureBodies", value: els.captureBodies.checked });
+  safePost({ type: "setCaptureBodies", value: els.captureBodies.checked });
 });
 els.copyAll.addEventListener("click", async () => {
   const urls = state.entries.filter(makeMatcher()).map((e) => e.url).join("\n");
   if (!urls) return;
   await navigator.clipboard.writeText(urls);
-  els.copyAll.textContent = "✓ Copied";
-  setTimeout(() => (els.copyAll.textContent = "⧉ Copy URLs"), 800);
+  els.copyAll.innerHTML = `${icon("check")}<span>Copied</span>`;
+  setTimeout(() => {
+    els.copyAll.innerHTML = `${icon("copy")}<span>Copy URLs</span>`;
+  }, 800);
 });
 els.exportHar.addEventListener("click", () => {
   const visible = state.entries.filter(makeMatcher());
@@ -805,6 +1051,6 @@ document.addEventListener("keydown", (ev) => {
       els.urlFilter.blur();
     }
   } else if (ev.key === "p" && !inField) {
-    port.postMessage({ type: "setPaused", value: !state.paused });
+    safePost({ type: "setPaused", value: !state.paused });
   }
 });

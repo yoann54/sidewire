@@ -49,6 +49,9 @@ FEATURES
 • HAR export — open in DevTools, Postman, Insomnia…
 • Replay — re-fire a captured request and see the response inline
 • Replay with… — open an inline editor to toggle/edit/add query parameters and edit the body (JSON pretty-print) before re-firing
+• Decode base64 response bodies in one click; JSON pretty-printed automatically when decoded
+• Optional JWT decoding — auto-shows the decoded header/payload JSON under any JWT-shaped header value (Authorization: Bearer …, etc.)
+• Light / dark theme — toggle in the title bar, follows OS preference by default
 • Optional response-body capture via chrome.debugger (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
 • Persistence — buffer kept in chrome.storage.session, survives service-worker restarts
 • Hotkeys: / focus URL filter, Esc clear filter, P pause/resume
@@ -93,7 +96,7 @@ Used to identify the active tab when the user selects "Active tab" capture scope
 
 ### `storage`
 ```
-Used to persist the in-memory request buffer in chrome.storage.session so that the side panel survives service-worker restarts during a browsing session. No data is written to chrome.storage.local or chrome.storage.sync.
+Used to persist the in-memory request buffer in chrome.storage.session so that the side panel survives service-worker restarts during a browsing session. Also used to persist non-sensitive UI preferences (theme: light/dark, JWT-decoding toggle) in chrome.storage.local — no captured request data is written there. Nothing is written to chrome.storage.sync.
 ```
 
 ### `debugger`

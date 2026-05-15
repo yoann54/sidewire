@@ -6,12 +6,27 @@
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
+  <div class="titlebar">
+    <span class="brand">
+      <svg viewBox="0 0 128 128" aria-hidden="true">
+        <rect x="20" y="60" width="20" height="48" rx="3" fill="#1a73e8"/>
+        <rect x="54" y="36" width="20" height="72" rx="3" fill="#1a73e8"/>
+        <rect x="88" y="76" width="20" height="32" rx="3" fill="#ea4335"/>
+        <line x1="14" y1="116" x2="114" y2="116" stroke="#1a73e8" stroke-width="6" stroke-linecap="round"/>
+      </svg>
+      Sidewire
+    </span>
+    <span class="version">v0.3.0</span>
+    <span class="spacer"></span>
+    <button id="themeToggle" class="icon-btn" title="Toggle theme"></button>
+  </div>
+
   <header>
     <div class="row">
-      <button id="pause" class="btn" title="Pause/resume capture (or click in panel and press P)">⏸ Pause</button>
-      <button id="clear" class="btn" title="Clear unstarred entries">🗑 Clear</button>
-      <button id="copyAll" class="btn" title="Copy all visible URLs">⧉ Copy URLs</button>
-      <button id="exportHar" class="btn" title="Export visible entries as HAR">↓ HAR</button>
+      <button id="pause" class="btn" title="Pause/resume capture (or click in panel and press P)"></button>
+      <button id="clear" class="btn" title="Clear unstarred entries"></button>
+      <button id="copyAll" class="btn" title="Copy all visible URLs"></button>
+      <button id="exportHar" class="btn" title="Export visible entries as HAR"></button>
       <span class="spacer"></span>
       <select id="scope" title="Capture scope">
         <option value="active">Active tab</option>
@@ -20,7 +35,11 @@
     </div>
 
     <div class="row">
-      <input id="urlFilter" type="text" placeholder="Filter URL (substring or /regex/) — press / to focus" />
+      <div class="search">
+        <span id="urlFilterIcon" class="search-icon"></span>
+        <input id="urlFilter" type="text" placeholder="Filter URL (substring or /regex/) — press / to focus" />
+        <button id="urlFilterClear" class="search-clear" type="button" title="Clear filter" hidden></button>
+      </div>
       <select id="statusFilter">
         <option value="">All statuses</option>
         <option value="2">2xx</option>
@@ -45,9 +64,12 @@
       <div class="chips" id="typeChips"></div>
     </details>
 
-    <div class="row small">
+    <div class="row small wrap">
       <label class="check" title="Attach chrome.debugger to active tab to capture response bodies (Chrome shows its built-in debugger notification bar on the tab while attached)">
         <input type="checkbox" id="captureBodies"> Capture response bodies (debugger)
+      </label>
+      <label class="check" title="Auto-decode JWT tokens found in request/response headers">
+        <input type="checkbox" id="decodeJwtToggle"> Decode JWT in headers
       </label>
     </div>
 

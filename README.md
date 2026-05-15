@@ -23,6 +23,9 @@ Chrome extension that logs network requests in a side panel — without opening 
 - **HAR export** → downloads visible entries as `.har` (openable in DevTools, Postman, Insomnia, …)
 - **Replay** → re-fires captured request with the same headers/body and shows the new response inline
 - **Replay with…** → opens an inline editor: toggle/edit/add query parameters, edit the body (with JSON pretty-print) before re-firing
+- **Decode base64** button on base64-encoded response bodies (one click → readable text, JSON auto pretty-printed)
+- **JWT decoding** (opt-in toggle) — auto-shows decoded `header` + `payload` JSON under any JWT-shaped header value (works for `Authorization: Bearer …` and similar)
+- **Light / dark theme** — toggle in the title bar, follows OS preference by default, persisted across sessions
 - **Response body capture** (toggle) — attaches `chrome.debugger` to the active tab. Chrome shows its built-in debugger notification bar on the inspected tab while attached.
 - **Persistence** — buffer kept in `chrome.storage.session`, survives service worker restarts
 - **Hotkeys**: `/` focus URL filter, `Esc` clear filter, `p` pause/resume
