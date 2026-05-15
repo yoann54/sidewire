@@ -188,6 +188,15 @@ function decodeBase64Text(b64) {
 
 const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
+function parseCookieHeader(value) {
+  if (!value) return [];
+  return value.split(/;\s*/).filter(Boolean).map((pair) => {
+    const eq = pair.indexOf("=");
+    if (eq === -1) return { name: pair.trim(), value: null, flag: true };
+    return { name: pair.slice(0, eq).trim(), value: pair.slice(eq + 1).trim(), flag: false };
+  });
+}
+
 function decodeJwt(value) {
   if (!value) return null;
   const token = String(value).replace(/^Bearer\s+/i, "").trim();
@@ -552,23 +561,47 @@ function kvList(pairs) {
     .join("")}</dl>`;
 }
 
+function renderJwtBlock(jwt, extraClass = "") {
+  return `
+    <div class="jwt-block ${extraClass}">
+      <div class="jwt-label">JWT header</div>
+      <pre class="code jwt-pre">${escapeHtml(jwt.header)}</pre>
+      <div class="jwt-label">JWT payload</div>
+      <pre class="code jwt-pre">${escapeHtml(jwt.payload)}</pre>
+    </div>`;
+}
+
+function renderCookieList(value) {
+  const cookies = parseCookieHeader(value);
+  if (!cookies.length) return escapeHtml(value);
+  return `<div class="cookies">` + cookies.map((c) => {
+    if (c.flag) {
+      return `<div class="cookie-row cookie-flag"><span class="cookie-name">${escapeHtml(c.name)}</span></div>`;
+    }
+    const jwt = state.decodeJwt ? decodeJwt(c.value) : null;
+    return `
+      <div class="cookie-row">
+        <span class="cookie-name">${escapeHtml(c.name)}</span>
+        <span class="cookie-value">${escapeHtml(c.value)}</span>
+        ${jwt ? renderJwtBlock(jwt, "cookie-jwt") : ""}
+      </div>`;
+  }).join("") + `</div>`;
+}
+
 function renderHeadersList(headers) {
   if (!headers || !headers.length) return `<div class="kv-empty">—</div>`;
   return `<dl class="kv">` + headers.map((h) => {
+    const name = h.name ?? "";
     const value = h.value ?? "";
-    const jwt = state.decodeJwt ? decodeJwt(value) : null;
-    let dd = `<dd>${escapeHtml(value)}`;
-    if (jwt) {
-      dd += `
-        <div class="jwt-block">
-          <div class="jwt-label">JWT header</div>
-          <pre class="code jwt-pre">${escapeHtml(jwt.header)}</pre>
-          <div class="jwt-label">JWT payload</div>
-          <pre class="code jwt-pre">${escapeHtml(jwt.payload)}</pre>
-        </div>`;
+    const lower = name.toLowerCase();
+    let dd;
+    if ((lower === "cookie" || lower === "set-cookie") && value) {
+      dd = `<dd>${renderCookieList(value)}</dd>`;
+    } else {
+      const jwt = state.decodeJwt ? decodeJwt(value) : null;
+      dd = `<dd>${escapeHtml(value)}${jwt ? renderJwtBlock(jwt) : ""}</dd>`;
     }
-    dd += `</dd>`;
-    return `<dt>${escapeHtml(h.name)}</dt>${dd}`;
+    return `<dt>${escapeHtml(name)}</dt>${dd}`;
   }).join("") + `</dl>`;
 }
 
@@ -620,15 +653,72 @@ function renderBase64Section(e, rawText) {
     </section>`;
 }
 
+function jsonValueHtml(value) {
+  if (value === null) return `<span class="jv-null">null</span>`;
+  const t = typeof value;
+  if (t === "string") return `<span class="jv-string">${escapeHtml(JSON.stringify(value))}</span>`;
+  if (t === "number") return `<span class="jv-number">${escapeHtml(String(value))}</span>`;
+  if (t === "boolean") return `<span class="jv-bool">${value}</span>`;
+  return `<span>${escapeHtml(String(value))}</span>`;
+}
+
+function jsonKeyHtml(key) {
+  if (key === undefined) return "";
+  const isIndex = typeof key === "number";
+  const cls = isIndex ? "jv-key jv-index" : "jv-key";
+  const text = isIndex ? String(key) : JSON.stringify(key);
+  return `<span class="${cls}">${escapeHtml(text)}</span><span class="jv-punct">: </span>`;
+}
+
+function jsonNode(value, key) {
+  if (value !== null && typeof value === "object") {
+    const isArr = Array.isArray(value);
+    const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+    const open = isArr ? "[" : "{";
+    const close = isArr ? "]" : "}";
+    const keyHtml = jsonKeyHtml(key);
+    if (entries.length === 0) {
+      return `<div class="jv-line">${keyHtml}<span class="jv-punct">${open}${close}</span></div>`;
+    }
+    const count = entries.length;
+    const label = isArr
+      ? `${count} ${count === 1 ? "item" : "items"}`
+      : `${count} ${count === 1 ? "key" : "keys"}`;
+    const children = entries.map(([k, v]) => jsonNode(v, isArr ? k : k)).join("");
+    return `
+      <div class="jv-node">
+        <div class="jv-line jv-header">
+          <span class="jv-toggle"></span>${keyHtml}<span class="jv-punct">${open}</span><span class="jv-preview"> ${label} ${close}</span>
+        </div>
+        <div class="jv-children">${children}</div>
+        <div class="jv-line jv-footer"><span class="jv-punct">${close}</span></div>
+      </div>`;
+  }
+  return `<div class="jv-line">${jsonKeyHtml(key)}${jsonValueHtml(value)}</div>`;
+}
+
+function renderJsonTree(parsed) {
+  return `<div class="jv">${jsonNode(parsed, undefined)}</div>`;
+}
+
+function bodyHtml(text, contentType) {
+  if (!text) return `<div class="kv-empty">—</div>`;
+  const looksJson = (contentType && /json|graphql/i.test(contentType)) || tryPrettyJson(text) !== null;
+  if (looksJson) {
+    try {
+      return renderJsonTree(JSON.parse(text.trim()));
+    } catch { /* fall through to <pre> */ }
+  }
+  return `<pre class="code">${escapeHtml(text)}</pre>`;
+}
+
 function fmtBodySection(title, bodyText, headers) {
   if (!bodyText) {
     return section(title, "", `<div class="kv-empty">—</div>`);
   }
   const ct = getHeader(headers, "content-type") || "";
-  const isJson = /json|graphql/i.test(ct) || tryPrettyJson(bodyText) !== null;
-  const pretty = isJson ? tryPrettyJson(bodyText) : null;
-  const display = pretty || bodyText;
-  return section(title, display, `<pre class="code">${escapeHtml(display)}</pre>`);
+  const copyText = tryPrettyJson(bodyText) || bodyText;
+  return section(title, copyText, bodyHtml(bodyText, ct));
 }
 
 function fmtTiming(e) {
@@ -733,6 +823,12 @@ function buildDetail(e) {
       copyText(sectionTexts.get(id) || "", ev.currentTarget);
     });
   }
+  wrap.addEventListener("click", (ev) => {
+    const header = ev.target.closest(".jv-header");
+    if (header && wrap.contains(header) && !window.getSelection()?.toString()) {
+      header.parentElement.classList.toggle("collapsed");
+    }
+  });
   return wrap;
 }
 
@@ -749,12 +845,12 @@ function renderReplay(r) {
       <div class="detail-body"><pre class="code error">${escapeHtml(r.error)}</pre></div>
     </section>`;
   }
-  const pretty = tryPrettyJson(r.body) || r.body;
+  const ct = (r.headers || []).find((h) => h.name?.toLowerCase() === "content-type")?.value || "";
   return `<section class="detail-section replay-section">
     <header><span>Replay result · ${r.status} · ${r.duration}ms</span></header>
     <div class="detail-body">
       ${kvList(r.headers.map((h) => [h.name, h.value]))}
-      <pre class="code">${escapeHtml(pretty)}</pre>
+      ${bodyHtml(r.body, ct)}
     </div>
   </section>`;
 }
