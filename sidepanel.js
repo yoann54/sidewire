@@ -12,6 +12,89 @@ const FORBIDDEN_FETCH_HEADERS = new Set([
   "referer", "te", "trailer", "transfer-encoding", "upgrade", "via"
 ]);
 
+const METHOD_HELP = {
+  GET:     ["GET",     "Read data from the server. Should not modify anything."],
+  POST:    ["POST",    "Create a new resource (form submit, file upload, etc.)."],
+  PUT:     ["PUT",     "Replace a resource entirely with the payload you send."],
+  PATCH:   ["PATCH",   "Partially update an existing resource."],
+  DELETE:  ["DELETE",  "Remove a resource."],
+  HEAD:    ["HEAD",    "Same as GET but returns only the response headers, no body."],
+  OPTIONS: ["OPTIONS", "CORS preflight — the browser asks the server what's allowed before sending the real request."]
+};
+
+const STATUS_HELP = {
+  200: ["200 OK",                        "The request succeeded."],
+  201: ["201 Created",                   "A new resource was created."],
+  202: ["202 Accepted",                  "Accepted for processing, but not yet complete."],
+  204: ["204 No Content",                "Success — the server intentionally returns no body."],
+  206: ["206 Partial Content",           "Partial response (range request, e.g. video seeking)."],
+  301: ["301 Moved Permanently",         "Resource has permanently moved to a new URL."],
+  302: ["302 Found",                     "Temporary redirect to a different URL."],
+  304: ["304 Not Modified",              "Cached version is still valid — no body returned."],
+  307: ["307 Temporary Redirect",        "Temporary redirect, keep the same HTTP method."],
+  308: ["308 Permanent Redirect",        "Permanent redirect, keep the same HTTP method."],
+  400: ["400 Bad Request",               "The server couldn't parse the request (malformed payload, missing fields…)."],
+  401: ["401 Unauthorized",              "Authentication required or invalid credentials."],
+  403: ["403 Forbidden",                 "Authenticated, but not allowed to access this resource."],
+  404: ["404 Not Found",                 "No resource exists at this URL."],
+  405: ["405 Method Not Allowed",        "This HTTP method isn't allowed on this endpoint."],
+  408: ["408 Request Timeout",           "The server timed out waiting for the request."],
+  409: ["409 Conflict",                  "Request conflicts with current server state (duplicate, version mismatch…)."],
+  410: ["410 Gone",                      "Resource used to exist but is permanently gone."],
+  413: ["413 Payload Too Large",         "Request body exceeds the server's limit."],
+  415: ["415 Unsupported Media Type",    "Server doesn't accept this Content-Type."],
+  422: ["422 Unprocessable Entity",      "Request is well-formed but semantically invalid (validation errors)."],
+  429: ["429 Too Many Requests",         "Rate limit exceeded — slow down or wait."],
+  500: ["500 Internal Server Error",     "Generic server-side error — check the server logs."],
+  501: ["501 Not Implemented",           "Server doesn't support this functionality."],
+  502: ["502 Bad Gateway",               "Upstream server returned an invalid response."],
+  503: ["503 Service Unavailable",       "Server is overloaded or down for maintenance."],
+  504: ["504 Gateway Timeout",           "Upstream server didn't respond in time."]
+};
+
+const STATUS_BUCKET_HELP = {
+  "1": ["Informational", "Provisional response — the final answer is coming."],
+  "2": ["Success",       "The request was successful."],
+  "3": ["Redirection",   "The browser needs to follow a different URL."],
+  "4": ["Client Error",  "Something is wrong with the request you sent."],
+  "5": ["Server Error",  "The server failed to handle the request."]
+};
+
+function statusHelp(e) {
+  if (e.state === "error") return ["Network error", e.error || "Request failed before reaching the server."];
+  if (e.status == null) return ["Pending", "Waiting for the response headers."];
+  if (STATUS_HELP[e.status]) return STATUS_HELP[e.status];
+  const bucket = String(e.status)[0];
+  if (STATUS_BUCKET_HELP[bucket]) {
+    const [name, sub] = STATUS_BUCKET_HELP[bucket];
+    return [`${e.status} ${name}`, sub];
+  }
+  return [String(e.status), ""];
+}
+
+function errorPreview(e) {
+  if (e.state === "error") {
+    return { label: "Network", text: e.error || "Request failed" };
+  }
+  if (e.status != null && e.status >= 400) {
+    const body = e.responseBody?.text;
+    if (!body || e.responseBody.base64Encoded) return null;
+    let text = body.trim();
+    try {
+      const j = JSON.parse(text);
+      if (j && typeof j === "object") {
+        const msg = j.message ?? j.error ?? j.error_description ?? j.detail ?? j.errors;
+        if (msg != null) text = typeof msg === "string" ? msg : JSON.stringify(msg);
+        else text = JSON.stringify(j);
+      }
+    } catch { /* not JSON, use raw */ }
+    text = text.replace(/\s+/g, " ").trim();
+    if (text.length > 160) text = text.slice(0, 160) + "…";
+    return { label: "Response", text };
+  }
+  return null;
+}
+
 const state = {
   entries: [],
   byId: new Map(),
@@ -324,7 +407,7 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Sidewire", version: "0.3.0" },
+      creator: { name: "Sidewire", version: "0.5.0" },
       entries: entries.map(harEntry)
     }
   };
@@ -871,8 +954,10 @@ function entryRow(e) {
   const isExpanded = state.expandedIds.has(e.id);
   const isSlow = e.duration != null && e.duration >= state.slowThreshold;
   const isStarred = state.starred.has(e.id);
+  const isError = e.state === "error" || (e.status != null && e.status >= 400);
   li.className = "entry"
     + (isExpanded ? " expanded" : "")
+    + (isError ? " error" : "")
     + (isSlow ? " slow" : "")
     + (isStarred ? " starred" : "");
   li.dataset.id = e.id;
@@ -881,7 +966,6 @@ function entryRow(e) {
   const statusText = e.state === "error" ? "ERR"
     : e.status != null ? e.status
     : "···";
-  const statusTitle = e.state === "error" ? (e.error || "Network error") : "";
   const op = gqlOp(e);
 
   const main = document.createElement("div");
@@ -889,8 +973,8 @@ function entryRow(e) {
   main.innerHTML = `
     <span class="caret">${icon(isExpanded ? "chevron-down" : "chevron-right")}</span>
     <span class="star" title="Star (kept across Clear)">${icon(isStarred ? "star-filled" : "star-empty")}</span>
-    <span class="method ${e.method}">${e.method}</span>
-    <span class="status ${sb ? "s" + sb : ""}"${statusTitle ? ` title="${escapeHtml(statusTitle)}"` : ""}>${escapeHtml(statusText)}</span>
+    <span class="method ${e.method}" data-tip-method="${e.method}">${e.method}</span>
+    <span class="status ${sb ? "s" + sb : ""}" data-tip-status="${escapeHtml(e.id)}">${escapeHtml(statusText)}</span>
     <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}</span>
     <span class="duration">${e.duration != null ? e.duration + "ms" : ""}</span>
   `;
@@ -913,6 +997,17 @@ function entryRow(e) {
   });
 
   li.appendChild(main);
+
+  if (!isExpanded) {
+    const hint = errorPreview(e);
+    if (hint) {
+      const hintEl = document.createElement("div");
+      hintEl.className = "row-hint";
+      hintEl.innerHTML = `<span class="label">${escapeHtml(hint.label)}</span>${escapeHtml(hint.text)}`;
+      li.appendChild(hintEl);
+    }
+  }
+
   if (isExpanded) li.appendChild(buildDetail(e));
   return li;
 }
@@ -1150,3 +1245,56 @@ document.addEventListener("keydown", (ev) => {
     safePost({ type: "setPaused", value: !state.paused });
   }
 });
+
+// ───── Help tooltip (method / status) ─────
+let tooltipEl = null;
+function getTooltipEl() {
+  if (tooltipEl) return tooltipEl;
+  tooltipEl = document.createElement("div");
+  tooltipEl.className = "sw-tooltip";
+  document.body.appendChild(tooltipEl);
+  return tooltipEl;
+}
+function showTooltip(target, title, sub) {
+  const el = getTooltipEl();
+  el.innerHTML = `<strong>${escapeHtml(title)}</strong>${sub ? `<span class="sub">${escapeHtml(sub)}</span>` : ""}`;
+  el.classList.add("visible");
+  const r = target.getBoundingClientRect();
+  const tr = el.getBoundingClientRect();
+  let top = r.bottom + 6;
+  if (top + tr.height > window.innerHeight - 8) top = r.top - tr.height - 6;
+  let left = r.left + r.width / 2 - tr.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - tr.width - 8));
+  el.style.top = `${top}px`;
+  el.style.left = `${left}px`;
+}
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.classList.remove("visible");
+}
+document.addEventListener("mouseover", (ev) => {
+  const t = ev.target.closest("[data-tip-method], [data-tip-status]");
+  if (!t) return;
+  const method = t.dataset.tipMethod;
+  if (method) {
+    const help = METHOD_HELP[method];
+    if (help) showTooltip(t, help[0], help[1]);
+    else showTooltip(t, method, "Custom HTTP method.");
+    return;
+  }
+  const statusId = t.dataset.tipStatus;
+  if (statusId) {
+    const entry = state.byId.get(statusId);
+    if (entry) {
+      const [title, sub] = statusHelp(entry);
+      showTooltip(t, title, sub);
+    }
+  }
+});
+document.addEventListener("mouseout", (ev) => {
+  const from = ev.target.closest?.("[data-tip-method], [data-tip-status]");
+  if (!from) return;
+  const to = ev.relatedTarget && ev.relatedTarget.closest?.("[data-tip-method], [data-tip-status]");
+  if (to) return; // moving to another tip target — let mouseover reposition
+  hideTooltip();
+});
+window.addEventListener("scroll", hideTooltip, true);

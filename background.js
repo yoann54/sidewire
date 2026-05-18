@@ -50,6 +50,17 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   if (captureBodies) await attachDebugger(tabId);
 });
 
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  try {
+    const [t] = await chrome.tabs.query({ active: true, windowId });
+    if (!t || t.id === activeTabId) return;
+    activeTabId = t.id;
+    broadcast({ type: "state", paused, scope, activeTabId, captureBodies });
+    if (captureBodies) await attachDebugger(t.id);
+  } catch {}
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === attachedTabId) {
     attachedTabId = null;
@@ -111,7 +122,7 @@ function broadcast(msg) {
 function shouldCapture(details) {
   if (paused) return false;
   if (details.tabId < 0) return false;
-  if (scope === "active" && details.tabId !== activeTabId) return false;
+  if (scope === "active" && activeTabId !== null && details.tabId !== activeTabId) return false;
   return true;
 }
 
