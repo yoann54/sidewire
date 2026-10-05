@@ -4,9 +4,9 @@ title: Sidewire — Privacy Policy
 
 # Sidewire — Privacy Policy
 
-_Last updated: 2026-05-15_
+_Last updated: 2026-10-05_
 
-_Applies to Sidewire version 0.3.0._
+_Applies to Sidewire version 0.7.0._
 
 Sidewire is a Chrome extension that displays the network traffic of the tabs you are actively capturing inside a side panel, as a developer tool.
 
@@ -21,14 +21,14 @@ While you have capture enabled, Sidewire reads the following from the tabs in sc
 - Request URL, method, resource type, status code, timings
 - Request and response headers
 - Request body (form data or raw, when present)
-- Response body — **only** when you explicitly enable the "Capture response bodies (debugger)" toggle, which attaches `chrome.debugger` to the active tab. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
+- Response body — **only** when you explicitly enable the "Capture response bodies (debugger)" toggle, which attaches `chrome.debugger` to the active tab. The `debugger` permission is not granted at install time: Chrome asks you for it the first time you enable this toggle. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
 
 This is the same kind of information you would see in Chrome's built-in DevTools Network panel.
 
 ## What the extension stores
 
-- A rolling buffer of captured entries (capped at 2,000) is kept in `chrome.storage.session` so that the side panel survives service-worker restarts. `chrome.storage.session` is cleared automatically by Chrome when the browser closes.
-- `chrome.storage.local` is used **only** to persist UI preferences (currently: theme, JWT-decoding toggle). No captured request data, headers, bodies, or URLs are written to it.
+- A rolling buffer of captured entries (capped at 2,000) is kept in `chrome.storage.session` so that the side panel survives service-worker restarts. Response bodies are held in memory only and are **not** written to `chrome.storage.session`; bodies larger than 1 MB, as well as images, media and fonts, are not captured at all. The capture state (paused, scope) is also kept there. `chrome.storage.session` is cleared automatically by Chrome when the browser closes.
+- `chrome.storage.local` is used **only** to persist UI preferences: theme, display toggles, and the active filters (filter text you typed, selected status/methods/types, and — if you picked one — the selected domain in the domain filter). No captured requests, headers or bodies are written to it.
 - The extension does **not** write to `chrome.storage.sync`.
 - The extension does **not** use cookies, IndexedDB, or any other persistent client-side storage.
 
@@ -38,8 +38,10 @@ This is the same kind of information you would see in Chrome's built-in DevTools
 
 The only network requests Sidewire itself performs are:
 
-- The "Replay" and "Replay with…" features, which re-fire a captured request at your explicit click. By default the request is sent unchanged to its original URL; the "Replay with…" editor lets you modify query parameters and the request body before sending. The destination is always the original host of the captured request, and the response is shown locally — it is not sent anywhere else.
-- The "HAR export" feature, which writes a `.har` file to your local file system via the browser's download dialog.
+- The "Replay" and "Replay with…" features, which re-fire a captured request at your explicit click. By default the request is sent unchanged to its original URL; the "Replay with…" editor lets you modify query parameters and the request body before sending. Replaying an entry that came from an imported HAR file asks for confirmation first. The destination is always the original host of the captured request, and the response is shown locally — it is not sent anywhere else.
+- The "HAR export" feature, which writes a `.har` file to your local file system via the browser's download dialog. By default, values of sensitive headers (Authorization, Cookie, Set-Cookie, API keys…) are replaced with `[redacted]` in the exported file.
+
+The "HAR import" feature reads a `.har` file you select from your local file system and displays it in the panel. The file is parsed locally and never uploaded anywhere.
 
 ## Permissions
 
@@ -47,9 +49,8 @@ The only network requests Sidewire itself performs are:
 |---|---|
 | `webRequest` | Read request/response metadata (URL, headers, status, timings) from tabs in capture scope |
 | `sidePanel` | Render the extension's UI in Chrome's side panel |
-| `tabs` | Identify the active tab when "Active tab" scope is selected |
-| `storage` | Persist the rolling buffer in `chrome.storage.session` and UI preferences (theme, JWT decoding) in `chrome.storage.local` |
-| `debugger` | Optional — attached only while the "Capture response bodies" toggle is on, to read response bodies via the Chrome DevTools Protocol |
+| `storage` | Persist the rolling buffer in `chrome.storage.session` and UI preferences (theme, filters, display toggles) in `chrome.storage.local` |
+| `debugger` | Optional permission, requested only when you first enable the toggle — attached only while the "Capture response bodies" toggle is on, to read response bodies via the Chrome DevTools Protocol |
 | `<all_urls>` host access | Allow the above to observe whichever site you choose to inspect |
 
 ## Third parties

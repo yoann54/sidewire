@@ -6,7 +6,7 @@ Notes de session pour reprendre proprement sur une autre machine. Ce fichier est
 
 Sidewire est une extension Chrome qui logge les requêtes réseau dans un side panel (sans ouvrir DevTools). Le code lui-même est fonctionnel — les sessions récentes ont porté sur **le rebranding** (`Watch Network` → `Sidewire`) et **la préparation de la soumission Chrome Web Store**.
 
-Le repo distant est `git@github.com:yoann54/sidewire.git` (déjà ajouté en `origin`, mais aucun commit n'a encore été poussé au moment où ces notes ont été écrites).
+Le repo distant est `git@github.com:yoann54/sidewire.git` (`origin`, `main` déjà poussé).
 
 ## Ce qui est fait
 
@@ -23,44 +23,29 @@ Le repo distant est `git@github.com:yoann54/sidewire.git` (déjà ajouté en `or
 ### Assets store
 - `store/promo-440x280.png` — petite tuile promo (recommandée)
 - `store/render-promo.html` — template versionné pour régénérer la promo
-- `store/listing.md` — **tous les textes** prêts à coller dans le dashboard Web Store : description courte/longue, "Single purpose", justification de chaque permission (`webRequest`, `sidePanel`, `tabs`, `storage`, `debugger`, `<all_urls>`), tableau des disclosures Data usage, certifications à cocher
+- `store/listing.md` — **tous les textes** prêts à coller dans le dashboard Web Store : description courte/longue, "Single purpose", justification de chaque permission (`webRequest`, `sidePanel`, `storage`, `debugger`, `<all_urls>`), tableau des disclosures Data usage, certifications à cocher
 - `store/README.md` — guide de régénération des assets
 - `PRIVACY.md` (racine) — politique de confidentialité
 
-## Ce qui reste à faire
+### Audit → v0.7.0 (2026-10-05)
+- Sécurité : méthode HTTP échappée et validée à l'import HAR ; cURL/PowerShell entièrement quotés (les noms de header peuvent contenir `'` `` ` `` `$`) ; secrets masqués à l'export HAR (par défaut) ; confirmation avant replay d'une entrée importée
+- Permissions : `tabs` retirée (inutile) ; `debugger` passée en `optional_permissions`, demandée au premier clic sur « Capture response bodies » ; `minimum_chrome_version: 116`
+- Robustesse : le panneau se reconnecte seul après un redémarrage du SW ; `paused`/`scope` persistés ; restauration du buffer sans race ; attach/detach debugger sérialisés ; bodies formData ré-encodés en urlencoded pour replay/exports
+- Perf : bodies > 1 Mo et images/media/fonts non capturés ; lignes et panneau de diff mis en cache (`rowCache`, `renderList(id)` ne reconstruit que la ligne concernée) ; le panneau retire les entrées évincées par le SW
+- Accessibilité : puces méthodes/types en `<button aria-pressed>` ; lignes, étoiles et en-têtes de groupe focusables (Entrée/Espace), ↑/↓ entre les lignes, focus restauré après chaque rendu, contour `:focus-visible`. Non traité : nœuds de l'arbre JSON (clic souris uniquement)
 
-### 1. Premier push GitHub
-```bash
-git status                              # vérifier ce qui va partir
-git add .
-git commit -m "Initial commit"
-git push -u origin main
-```
-(`origin` pointe déjà vers `git@github.com:yoann54/sidewire.git`. Si le repo distant a été créé avec un README/license, faire `git pull --rebase origin main` avant le push.)
+## Publication
 
-### 2. Publier `PRIVACY.md` via GitHub Pages
-- Repo Settings → **Pages** → Source : *Deploy from a branch* → Branche `main` / dossier `/ (root)` → Save
-- L'URL à coller dans le champ "Privacy policy URL" du dashboard Web Store sera :
-  ```
-  https://yoann54.github.io/sidewire/PRIVACY
-  ```
-  (Jekyll convertit `PRIVACY.md` en HTML automatiquement.)
+- **Publiée** sur le Chrome Web Store (ID `mkhgmicflbbhfohnkpkmcnkdjhipdfmk`), v0.6.0 en ligne au 2026-10-05
+- Politique de confidentialité : `https://yoann54.github.io/sidewire/PRIVACY` (GitHub Pages, branche `main`)
 
-### 3. Screenshots du store (manuel — pas de raccourci possible)
-- 1 à 5 screenshots **1280×800** (ou 640×400) PNG/JPG
-- Reco de contenu : (a) la liste des requêtes capturées, (b) une entrée dépliée avec headers/body, (c) le filtre URL en action, (d) l'export HAR ou la replay
-- Au moins 1 est obligatoire pour soumettre
-
-### 4. Optionnel
-- Tuile marquee 1400×560 (uniquement utile pour être éligible au "featured")
-- Charger l'extension non packagée dans Chrome (`chrome://extensions` → Load unpacked) pour vérifier que les icônes s'affichent bien dans la toolbar avant de soumettre
-
-### 5. Soumission Web Store
-- Dashboard → Add new item → upload du ZIP du repo (sans le dossier `store/` ni `PRIVACY.md` ni `CLAUDE.md` — ces fichiers ne sont pas utiles dans le bundle uploadé). Un `.gitignore` ou un script de packaging serait à faire si on veut automatiser le ZIP propre.
-- Coller tous les champs depuis `store/listing.md`
-- Coller l'URL Pages dans "Privacy policy URL"
-- Uploader les screenshots + `store/promo-440x280.png` (champ "Small tile")
-- Soumettre pour review (délai habituel : quelques jours à 2 semaines)
+### Publier une mise à jour
+1. Bumper la version partout (`manifest.json`, `sidepanel.html`, `buildHAR()` dans `sidepanel.js`, `PRIVACY.md`) — le store refuse une version déjà publiée
+2. Commit + push (met à jour la page PRIVACY)
+3. `./package.sh` → `sidewire.zip`
+4. Dashboard → **Importer un nouveau package** → `sidewire.zip`
+5. Mettre à jour Fiche Play Store / Confidentialité depuis `store/listing.md` si les textes ou permissions ont changé
+6. Soumettre pour review
 
 ## Détails utiles
 

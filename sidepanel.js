@@ -115,7 +115,17 @@ const state = {
   replays: new Map(),
   replayWithOpen: new Set(),
   replayDrafts: new Map(),
-  decodedBase64: new Set()
+  decodedBase64: new Set(),
+  searchBodies: false,
+  flagSecrets: false,
+  // On by default, like DevTools' sanitized HAR export.
+  redactHar: true,
+  showSize: false,
+  showWaterfall: false,
+  groupByDomain: false,
+  collapsedHosts: new Set(),
+  diffSelection: [],
+  dropped: 0
 };
 
 const els = {
@@ -124,6 +134,9 @@ const els = {
   clear: document.getElementById("clear"),
   copyAll: document.getElementById("copyAll"),
   exportHar: document.getElementById("exportHar"),
+  importHar: document.getElementById("importHar"),
+  harFileInput: document.getElementById("harFileInput"),
+  diffBtn: document.getElementById("diffBtn"),
   scope: document.getElementById("scope"),
   urlFilter: document.getElementById("urlFilter"),
   urlFilterIcon: document.getElementById("urlFilterIcon"),
@@ -134,10 +147,17 @@ const els = {
   slowThreshold: document.getElementById("slowThreshold"),
   captureBodies: document.getElementById("captureBodies"),
   decodeJwtToggle: document.getElementById("decodeJwtToggle"),
+  searchBodies: document.getElementById("searchBodies"),
+  flagSecrets: document.getElementById("flagSecrets"),
+  redactHar: document.getElementById("redactHar"),
+  showSize: document.getElementById("showSize"),
+  showWaterfall: document.getElementById("showWaterfall"),
+  groupByDomain: document.getElementById("groupByDomain"),
   methodChips: document.getElementById("methodChips"),
   typeChips: document.getElementById("typeChips"),
   counts: document.getElementById("counts"),
   themeToggle: document.getElementById("themeToggle"),
+  donate: document.getElementById("donate"),
   empty: null
 };
 
@@ -167,7 +187,11 @@ const ICONS = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
   moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
   search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
-  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>'
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>',
+  upload: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  diff: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 9a9 9 0 01-9 9M18 9V6a2 2 0 00-2-2h-3"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 10-7.8 7.8l1 1L12 21l7.8-7.8 1-1a5.5 5.5 0 000-7.8z"/>'
 };
 
 function icon(name) {
@@ -204,12 +228,42 @@ function tryHost(url) {
 
 function compileUrlFilter(raw) {
   if (!raw) return null;
-  const m = raw.match(/^\/(.+)\/([gimsuy]*)$/);
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
   if (m) {
-    try { return new RegExp(m[1], m[2]); } catch { return null; }
+    try {
+      const re = new RegExp(m[1], m[2]);
+      return { test: (u) => re.test(u) };
+    } catch { return null; }
   }
-  const lower = raw.toLowerCase();
-  return { test: (u) => u.toLowerCase().includes(lower) };
+  // Space-separated terms: all positive terms must match (AND), any term
+  // prefixed with "-" excludes. e.g. `api -analytics -.png`
+  const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+  const pos = [], neg = [];
+  for (const t of tokens) {
+    if (t.startsWith("-") && t.length > 1) neg.push(t.slice(1));
+    else pos.push(t);
+  }
+  return {
+    test: (u) => {
+      const s = u.toLowerCase();
+      for (const n of neg) if (s.includes(n)) return false;
+      for (const p of pos) if (!s.includes(p)) return false;
+      return true;
+    }
+  };
+}
+
+// Text a "search bodies/headers" filter matches against: URL + headers + bodies.
+function entryHaystack(e) {
+  const parts = [e.url];
+  for (const h of e.requestHeaders || []) parts.push(h.name, h.value);
+  for (const h of e.responseHeaders || []) parts.push(h.name, h.value);
+  const rb = bodyToText(e.requestBody);
+  if (rb) parts.push(rb);
+  if (e.responseBody?.text && !e.responseBody.base64Encoded) parts.push(e.responseBody.text);
+  return parts.filter(Boolean).join("\n");
 }
 
 function statusBucket(e) {
@@ -227,7 +281,7 @@ function makeMatcher() {
     if (!state.methods.has(e.method)) return false;
     if (!state.types.has(e.type)) return false;
     if (statusF && statusBucket(e) !== statusF) return false;
-    if (urlF && !urlF.test(e.url)) return false;
+    if (urlF && !urlF.test(state.searchBodies ? entryHaystack(e) : e.url)) return false;
     if (domain && tryHost(e.url) !== domain) return false;
     return true;
   };
@@ -245,6 +299,32 @@ function bodyToText(body) {
   }
   if (body.kind === "error") return `[error: ${body.error}]`;
   return "";
+}
+
+// Body as it should go back on the wire (replay, cURL, fetch, HAR). webRequest
+// decodes both urlencoded and multipart forms into formData; the original
+// multipart boundary is lost, so forms are always re-sent urlencoded.
+function wireBody(body) {
+  if (body?.kind !== "formData") return bodyToText(body);
+  const params = new URLSearchParams();
+  for (const [k, vals] of Object.entries(body.data)) {
+    for (const v of Array.isArray(vals) ? vals : [vals]) params.append(k, v);
+  }
+  return params.toString();
+}
+
+// Request headers to re-send: drops HTTP/2 pseudo-headers and, for formData
+// bodies, swaps Content-Type to match what wireBody() produces.
+function wireHeaders(e) {
+  const isForm = e.requestBody?.kind === "formData";
+  const out = [];
+  for (const h of e.requestHeaders || []) {
+    if (h.name.startsWith(":")) continue;
+    if (isForm && h.name.toLowerCase() === "content-type") continue;
+    out.push({ name: h.name, value: h.value ?? "" });
+  }
+  if (isForm) out.push({ name: "Content-Type", value: "application/x-www-form-urlencoded" });
+  return out;
 }
 
 function tryPrettyJson(text) {
@@ -323,28 +403,50 @@ function gqlOp(e) {
 // ─── builders ────────────────────────────────────────────────────────────
 
 function buildCurl(e) {
-  const parts = [`curl '${e.url.replace(/'/g, "'\\''")}'`];
-  if (e.method && e.method !== "GET") parts.push(`-X ${e.method}`);
-  for (const h of e.requestHeaders || []) {
-    if (h.name.startsWith(":")) continue;
-    const v = (h.value ?? "").replace(/'/g, "'\\''");
-    parts.push(`-H '${h.name}: ${v}'`);
-  }
-  const body = bodyToText(e.requestBody);
-  if (body) parts.push(`--data-raw '${body.replace(/'/g, "'\\''")}'`);
+  // Everything goes through shq(): header names may legally contain ' ` $ | &.
+  const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+  const parts = [`curl ${shq(e.url)}`];
+  if (e.method && e.method !== "GET") parts.push(`-X ${shq(e.method)}`);
+  for (const h of wireHeaders(e)) parts.push(`-H ${shq(`${h.name}: ${h.value}`)}`);
+  const body = wireBody(e.requestBody);
+  if (body) parts.push(`--data-raw ${shq(body)}`);
   return parts.join(" \\\n  ");
 }
 
 function buildFetch(e) {
   const headers = {};
-  for (const h of e.requestHeaders || []) {
-    if (h.name.startsWith(":")) continue;
-    headers[h.name] = h.value ?? "";
-  }
+  for (const h of wireHeaders(e)) headers[h.name] = h.value;
   const init = { headers, method: e.method, mode: "cors", credentials: "include" };
-  const body = bodyToText(e.requestBody);
+  const body = wireBody(e.requestBody);
   if (body && e.method !== "GET" && e.method !== "HEAD") init.body = body;
   return `fetch(${JSON.stringify(e.url)}, ${JSON.stringify(init, null, 2)});`;
+}
+
+function buildPowerShell(e) {
+  const psq = (s) => String(s).replace(/'/g, "''");
+  const headers = wireHeaders(e);
+  let prefix = "";
+  if (headers.length) {
+    const pairs = headers.map((h) => `  '${psq(h.name)}' = '${psq(h.value)}'`).join("\n");
+    prefix = `$headers = @{\n${pairs}\n}\n`;
+  }
+  const parts = [`Invoke-WebRequest -Uri '${psq(e.url)}'`, `-Method '${psq(e.method)}'`];
+  if (headers.length) parts.push(`-Headers $headers`);
+  const body = wireBody(e.requestBody);
+  if (body && e.method !== "GET" && e.method !== "HEAD") parts.push(`-Body '${psq(body)}'`);
+  return prefix + parts.join(" `\n  ");
+}
+
+function buildNodeFetch(e) {
+  const headers = {};
+  for (const h of wireHeaders(e)) headers[h.name] = h.value;
+  const init = { method: e.method, headers };
+  const body = wireBody(e.requestBody);
+  if (body && e.method !== "GET" && e.method !== "HEAD") init.body = body;
+  return `// Node 18+ (global fetch)\n` +
+    `const res = await fetch(${JSON.stringify(e.url)}, ${JSON.stringify(init, null, 2)});\n` +
+    `const text = await res.text();\n` +
+    `console.log(res.status, text);`;
 }
 
 function harEntry(e) {
@@ -353,9 +455,13 @@ function harEntry(e) {
     const u = new URL(e.url);
     queryString = [...u.searchParams.entries()].map(([name, value]) => ({ name, value }));
   } catch { /* ignore */ }
-  const reqHeaders = (e.requestHeaders || []).map((h) => ({ name: h.name, value: h.value ?? "" }));
-  const respHeaders = (e.responseHeaders || []).map((h) => ({ name: h.name, value: h.value ?? "" }));
-  const reqBodyText = bodyToText(e.requestBody);
+  const harHeader = (h) => ({
+    name: h.name,
+    value: state.redactHar && SENSITIVE_HEADERS.has(h.name?.toLowerCase()) ? "[redacted]" : (h.value ?? "")
+  });
+  const reqHeaders = (e.requestHeaders || []).map(harHeader);
+  const respHeaders = (e.responseHeaders || []).map(harHeader);
+  const reqBodyText = wireBody(e.requestBody);
   const mimeType = getHeader(e.responseHeaders, "content-type") || "";
 
   const out = {
@@ -396,7 +502,7 @@ function harEntry(e) {
   if (e.responseBody?.base64Encoded) out.response.content.encoding = "base64";
   if (reqBodyText) {
     out.request.postData = {
-      mimeType: getHeader(e.requestHeaders, "content-type") || "",
+      mimeType: getHeader(wireHeaders(e), "content-type") || "",
       text: reqBodyText
     };
   }
@@ -407,23 +513,76 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Sidewire", version: "0.5.0" },
+      creator: { name: "Sidewire", version: "0.7.0" },
       entries: entries.map(harEntry)
     }
   };
 }
 
+const HTTP_TOKEN_RE = /^[A-Za-z]+$/;
+
+// Convert a parsed HAR log back into internal entry objects for display.
+function harToEntries(har, stamp) {
+  const list = har?.log?.entries;
+  if (!Array.isArray(list)) return [];
+  return list.map((h, i) => {
+    const req = h.request || {};
+    const res = h.response || {};
+    const started = h.startedDateTime ? Date.parse(h.startedDateTime) : null;
+    const startedAt = Number.isNaN(started) ? null : started;
+    const time = typeof h.time === "number" && h.time >= 0 ? Math.round(h.time) : null;
+    const t = h.timings || {};
+    const send = typeof t.send === "number" && t.send > 0 ? t.send : 0;
+    const wait = typeof t.wait === "number" && t.wait > 0 ? t.wait : 0;
+    const headersAt = startedAt != null ? startedAt + send + wait : null;
+    const content = res.content || {};
+    const respText = content.text || "";
+    const isB64 = content.encoding === "base64";
+    const reqBodyText = req.postData?.text || "";
+    const method = typeof req.method === "string" && HTTP_TOKEN_RE.test(req.method)
+      ? req.method.toUpperCase() : "GET";
+    let type = h._resourceType || "other";
+    if (!TYPES.includes(type)) type = "other";
+    const status = typeof res.status === "number" ? res.status : null;
+    return {
+      id: `har-${stamp}-${i}`,
+      url: req.url || "",
+      method,
+      type,
+      tabId: -2,
+      startedAt,
+      headersReceivedAt: headersAt,
+      completedAt: (startedAt != null && time != null) ? startedAt + time : null,
+      status: status === 0 ? null : status,
+      duration: time,
+      state: status === 0 ? "error" : "completed",
+      error: status === 0 ? "imported (no response)" : null,
+      requestHeaders: Array.isArray(req.headers) ? req.headers.map((x) => ({ name: x.name, value: x.value })) : [],
+      requestBody: reqBodyText ? { kind: "raw", text: reqBodyText } : null,
+      responseHeaders: Array.isArray(res.headers) ? res.headers.map((x) => ({ name: x.name, value: x.value })) : [],
+      responseBody: respText ? { text: respText, base64Encoded: isB64 } : null,
+      imported: true
+    };
+  });
+}
+
 // ─── replay ──────────────────────────────────────────────────────────────
+
+// Imported entries come from an arbitrary file: replaying one sends a request
+// to its URL with the user's cookies, so ask first.
+function confirmImportedReplay(e) {
+  if (!e.imported) return true;
+  return confirm(`This request comes from an imported HAR file.\n\nSend ${e.method} ${e.url} with your browser cookies?`);
+}
 
 async function replay(e, overrides = {}) {
   const method = overrides.method || e.method;
   const init = { method, headers: {}, credentials: "include" };
-  for (const h of e.requestHeaders || []) {
-    if (h.name.startsWith(":")) continue;
+  for (const h of wireHeaders(e)) {
     if (FORBIDDEN_FETCH_HEADERS.has(h.name.toLowerCase())) continue;
-    init.headers[h.name] = h.value ?? "";
+    init.headers[h.name] = h.value;
   }
-  const body = overrides.body != null ? overrides.body : bodyToText(e.requestBody);
+  const body = overrides.body != null ? overrides.body : wireBody(e.requestBody);
   if (body && method !== "GET" && method !== "HEAD") init.body = body;
   const url = overrides.url || e.url;
   const start = performance.now();
@@ -447,13 +606,17 @@ async function replay(e, overrides = {}) {
 function renderChips(container, values, selected, kind) {
   container.innerHTML = "";
   for (const v of values) {
-    const el = document.createElement("span");
+    const el = document.createElement("button");
+    el.type = "button";
     const kindCls = kind === "method" ? ` method-chip ${v}` : "";
     el.className = "chip" + kindCls + (selected.has(v) ? " on" : "");
+    el.setAttribute("aria-pressed", String(selected.has(v)));
     el.textContent = v;
     el.addEventListener("click", () => {
       if (selected.has(v)) selected.delete(v); else selected.add(v);
       el.classList.toggle("on");
+      el.setAttribute("aria-pressed", String(selected.has(v)));
+      savePrefs();
       renderList();
     });
     container.appendChild(el);
@@ -465,12 +628,20 @@ renderChips(els.typeChips, TYPES, state.types);
 els.clear.innerHTML = `${icon("trash")}<span>Clear</span>`;
 els.copyAll.innerHTML = `${icon("copy")}<span>Copy URLs</span>`;
 els.exportHar.innerHTML = `${icon("download")}<span>HAR</span>`;
+els.importHar.innerHTML = `${icon("upload")}<span>Import</span>`;
 els.urlFilterIcon.innerHTML = icon("search");
 els.urlFilterClear.innerHTML = icon("close");
+els.donate.innerHTML = icon("heart");
+els.donate.addEventListener("click", () => {
+  // Just navigate to an external URL in a new tab — no remote code runs in the
+  // extension, so this stays within MV3's CSP and Web Store policy.
+  chrome.tabs.create({ url: "https://paypal.me/yoadadev" });
+});
 
-// ─── persisted UI prefs (theme, jwt decode) ─────────────────────────────
+// ─── persisted UI prefs (theme, filters, toggles) ───────────────────────
 const THEME_KEY = "sidewire-theme";
-const JWT_KEY = "sidewire-decode-jwt";
+const PREFS_KEY = "sidewire-prefs";
+const LEGACY_JWT_KEY = "sidewire-decode-jwt";
 
 function applyTheme(theme) {
   const isLight = theme === "light";
@@ -482,17 +653,83 @@ function applyTheme(theme) {
 let currentTheme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 applyTheme(currentTheme);
 
-chrome.storage.local.get([THEME_KEY, JWT_KEY]).then((res) => {
+function collectPrefs() {
+  return {
+    decodeJwt: state.decodeJwt,
+    searchBodies: state.searchBodies,
+    flagSecrets: state.flagSecrets,
+    redactHar: state.redactHar,
+    showSize: state.showSize,
+    showWaterfall: state.showWaterfall,
+    groupByDomain: state.groupByDomain,
+    urlFilter: state.urlFilter,
+    statusFilter: state.statusFilter,
+    domainFilter: state.domainFilter,
+    starredOnly: state.starredOnly,
+    slowThreshold: state.slowThreshold,
+    methods: [...state.methods],
+    types: [...state.types]
+  };
+}
+
+let savePrefsScheduled = false;
+function savePrefs() {
+  if (savePrefsScheduled) return;
+  savePrefsScheduled = true;
+  setTimeout(() => {
+    savePrefsScheduled = false;
+    chrome.storage.local.set({ [PREFS_KEY]: collectPrefs() }).catch(() => {});
+  }, 300);
+}
+
+function syncPrefControls() {
+  els.decodeJwtToggle.checked = state.decodeJwt;
+  els.searchBodies.checked = state.searchBodies;
+  els.flagSecrets.checked = state.flagSecrets;
+  els.redactHar.checked = state.redactHar;
+  els.showSize.checked = state.showSize;
+  els.showWaterfall.checked = state.showWaterfall;
+  els.groupByDomain.checked = state.groupByDomain;
+  els.urlFilter.value = state.urlFilter;
+  els.urlFilterClear.hidden = !state.urlFilter;
+  els.statusFilter.value = state.statusFilter;
+  els.starredOnly.checked = state.starredOnly;
+  els.slowThreshold.value = state.slowThreshold;
+  els.list.classList.toggle("show-size", state.showSize);
+  els.list.classList.toggle("show-waterfall", state.showWaterfall);
+}
+
+function applyPrefs(p) {
+  if (typeof p.decodeJwt === "boolean") state.decodeJwt = p.decodeJwt;
+  if (typeof p.searchBodies === "boolean") state.searchBodies = p.searchBodies;
+  if (typeof p.flagSecrets === "boolean") state.flagSecrets = p.flagSecrets;
+  if (typeof p.redactHar === "boolean") state.redactHar = p.redactHar;
+  if (typeof p.showSize === "boolean") state.showSize = p.showSize;
+  if (typeof p.showWaterfall === "boolean") state.showWaterfall = p.showWaterfall;
+  if (typeof p.groupByDomain === "boolean") state.groupByDomain = p.groupByDomain;
+  if (typeof p.urlFilter === "string") state.urlFilter = p.urlFilter;
+  if (typeof p.statusFilter === "string") state.statusFilter = p.statusFilter;
+  if (typeof p.domainFilter === "string") state.domainFilter = p.domainFilter;
+  if (typeof p.starredOnly === "boolean") state.starredOnly = p.starredOnly;
+  if (typeof p.slowThreshold === "number") state.slowThreshold = p.slowThreshold;
+  if (Array.isArray(p.methods) && p.methods.length) state.methods = new Set(p.methods);
+  if (Array.isArray(p.types) && p.types.length) state.types = new Set(p.types);
+  syncPrefControls();
+  renderChips(els.methodChips, METHODS, state.methods, "method");
+  renderChips(els.typeChips, TYPES, state.types);
+  refreshDomainOptions();
+  renderList();
+}
+
+chrome.storage.local.get([THEME_KEY, PREFS_KEY, LEGACY_JWT_KEY]).then((res) => {
   const stored = res?.[THEME_KEY];
   if (stored === "light" || stored === "dark") {
     currentTheme = stored;
     applyTheme(currentTheme);
   }
-  if (res?.[JWT_KEY] === true) {
-    state.decodeJwt = true;
-    els.decodeJwtToggle.checked = true;
-    renderList();
-  }
+  const p = res?.[PREFS_KEY] || {};
+  if (res?.[LEGACY_JWT_KEY] === true && p.decodeJwt === undefined) p.decodeJwt = true;
+  applyPrefs(p);
 }).catch(() => {});
 
 els.themeToggle.addEventListener("click", () => {
@@ -503,7 +740,38 @@ els.themeToggle.addEventListener("click", () => {
 
 els.decodeJwtToggle.addEventListener("change", () => {
   state.decodeJwt = els.decodeJwtToggle.checked;
-  chrome.storage.local.set({ [JWT_KEY]: state.decodeJwt }).catch(() => {});
+  savePrefs();
+  renderList();
+});
+els.searchBodies.addEventListener("change", () => {
+  state.searchBodies = els.searchBodies.checked;
+  savePrefs();
+  renderList();
+});
+els.flagSecrets.addEventListener("change", () => {
+  state.flagSecrets = els.flagSecrets.checked;
+  savePrefs();
+  renderList();
+});
+els.redactHar.addEventListener("change", () => {
+  state.redactHar = els.redactHar.checked;
+  savePrefs();
+});
+els.showSize.addEventListener("change", () => {
+  state.showSize = els.showSize.checked;
+  els.list.classList.toggle("show-size", state.showSize);
+  savePrefs();
+  renderList();
+});
+els.showWaterfall.addEventListener("change", () => {
+  state.showWaterfall = els.showWaterfall.checked;
+  els.list.classList.toggle("show-waterfall", state.showWaterfall);
+  savePrefs();
+  renderList();
+});
+els.groupByDomain.addEventListener("change", () => {
+  state.groupByDomain = els.groupByDomain.checked;
+  savePrefs();
   renderList();
 });
 
@@ -525,7 +793,7 @@ function getOrInitDraft(e) {
     const u = new URL(e.url);
     params = [...u.searchParams.entries()].map(([key, value]) => ({ key, value, enabled: true }));
   } catch { /* unparseable url */ }
-  draft = { params, body: bodyToText(e.requestBody) };
+  draft = { params, body: wireBody(e.requestBody) };
   state.replayDrafts.set(e.id, draft);
   return draft;
 }
@@ -613,24 +881,25 @@ function attachReplayEditorHandlers(root, e) {
     const kind = t.dataset.rw;
     if (kind === "close") {
       state.replayWithOpen.delete(e.id);
-      renderList();
+      renderList(e.id);
     } else if (kind === "param-add") {
       draft.params.push({ key: "", value: "", enabled: true });
-      renderList();
+      renderList(e.id);
     } else if (kind === "param-remove") {
       const i = +t.dataset.i;
       draft.params.splice(i, 1);
-      renderList();
+      renderList(e.id);
     } else if (kind === "body-pretty") {
       const pretty = tryPrettyJson(draft.body);
-      if (pretty) { draft.body = pretty; renderList(); }
+      if (pretty) { draft.body = pretty; renderList(e.id); }
     } else if (kind === "send") {
+      if (!confirmImportedReplay(e)) return;
       state.replays.set(e.id, { pending: true });
-      renderList();
+      renderList(e.id);
       const url = composeUrlFromDraft(e, draft);
       const result = await replay(e, { url, body: draft.body });
       state.replays.set(e.id, result);
-      renderList();
+      renderList(e.id);
     }
   });
 }
@@ -671,6 +940,36 @@ function renderCookieList(value) {
   }).join("") + `</div>`;
 }
 
+const SENSITIVE_HEADERS = new Set([
+  "authorization", "proxy-authorization", "cookie", "set-cookie",
+  "x-api-key", "api-key", "x-auth-token", "auth-token", "x-access-token",
+  "x-session-token", "x-csrf-token", "x-xsrf-token", "x-secret"
+]);
+
+// For a Set-Cookie value, return the recommended flags it is missing.
+function cookieSecurityWarnings(rawValue) {
+  const v = rawValue.toLowerCase();
+  const missing = [];
+  if (!/;\s*secure/.test(v)) missing.push("Secure");
+  if (!/;\s*httponly/.test(v)) missing.push("HttpOnly");
+  return missing;
+}
+
+function headerBadges(lower, value) {
+  if (!state.flagSecrets) return "";
+  let out = "";
+  if (SENSITIVE_HEADERS.has(lower)) {
+    out += `<span class="secret-badge" title="Sensitive header — avoid sharing">${icon("shield")}secret</span>`;
+  }
+  if (lower === "set-cookie" && value) {
+    const missing = cookieSecurityWarnings(value);
+    if (missing.length) {
+      out += `<span class="secret-badge warn" title="Cookie missing recommended flags">⚠ ${escapeHtml(missing.join(", "))}</span>`;
+    }
+  }
+  return out;
+}
+
 function renderHeadersList(headers) {
   if (!headers || !headers.length) return `<div class="kv-empty">—</div>`;
   return `<dl class="kv">` + headers.map((h) => {
@@ -684,7 +983,7 @@ function renderHeadersList(headers) {
       const jwt = state.decodeJwt ? decodeJwt(value) : null;
       dd = `<dd>${escapeHtml(value)}${jwt ? renderJwtBlock(jwt) : ""}</dd>`;
     }
-    return `<dt>${escapeHtml(name)}</dt>${dd}`;
+    return `<dt>${escapeHtml(name)}${headerBadges(lower, value)}</dt>${dd}`;
   }).join("") + `</dl>`;
 }
 
@@ -842,6 +1141,8 @@ function buildDetail(e) {
   const respBodySection = e.responseBody == null
     ? section("Response body", "",
         `<div class="kv-empty">${state.captureBodies ? "(not captured)" : "Enable response body capture to see this"}</div>`)
+    : e.responseBody.omitted
+      ? section("Response body", "", `<div class="kv-empty">Not captured — ${escapeHtml(e.responseBody.omitted)}</div>`)
     : respIsBase64
       ? renderBase64Section(e, respBodyText)
       : fmtBodySection("Response body", respBodyText, e.responseHeaders);
@@ -855,8 +1156,11 @@ function buildDetail(e) {
       <button class="mini" data-action="copy-url">${icon("copy")}<span>Copy URL</span></button>
       <button class="mini" data-action="copy-curl">${icon("copy")}<span>cURL</span></button>
       <button class="mini" data-action="copy-fetch">${icon("copy")}<span>fetch</span></button>
+      <button class="mini" data-action="copy-powershell">${icon("copy")}<span>PowerShell</span></button>
+      <button class="mini" data-action="copy-node">${icon("copy")}<span>node</span></button>
       <button class="mini" data-action="replay">${icon("play")}<span>Replay</span></button>
       <button class="mini ${editorOpen ? "active" : ""}" data-action="replay-with">${icon("pencil")}<span>Replay with…</span></button>
+      <button class="mini ${state.diffSelection.includes(e.id) ? "active" : ""}" data-action="diff">${icon("diff")}<span>${state.diffSelection.includes(e.id) ? "Selected" : "Diff"}</span></button>
     </div>
     ${editorOpen ? buildReplayEditor(e) : ""}
     ${section("URL", e.url, `<div class="code">${escapeHtml(e.url)}</div>`)}
@@ -878,33 +1182,44 @@ function buildDetail(e) {
   wrap.querySelector('[data-action="copy-fetch"]').addEventListener("click", (ev) => {
     copyText(buildFetch(e), ev.currentTarget);
   });
+  wrap.querySelector('[data-action="copy-powershell"]').addEventListener("click", (ev) => {
+    copyText(buildPowerShell(e), ev.currentTarget);
+  });
+  wrap.querySelector('[data-action="copy-node"]').addEventListener("click", (ev) => {
+    copyText(buildNodeFetch(e), ev.currentTarget);
+  });
+  wrap.querySelector('[data-action="diff"]').addEventListener("click", () => {
+    toggleDiffSelection(e.id);
+  });
   wrap.querySelector('[data-action="replay"]').addEventListener("click", async () => {
+    if (!confirmImportedReplay(e)) return;
     state.replays.set(e.id, { pending: true });
-    renderList();
+    renderList(e.id);
     const result = await replay(e);
     state.replays.set(e.id, result);
-    renderList();
+    renderList(e.id);
   });
   wrap.querySelector('[data-action="replay-with"]').addEventListener("click", () => {
     if (state.replayWithOpen.has(e.id)) state.replayWithOpen.delete(e.id);
     else state.replayWithOpen.add(e.id);
-    renderList();
+    renderList(e.id);
   });
   const decodeBtn = wrap.querySelector('[data-action="toggle-base64-decode"]');
   if (decodeBtn) {
     decodeBtn.addEventListener("click", () => {
       if (state.decodedBase64.has(e.id)) state.decodedBase64.delete(e.id);
       else state.decodedBase64.add(e.id);
-      renderList();
+      renderList(e.id);
     });
   }
   const editor = wrap.querySelector(".rw-section");
   if (editor) attachReplayEditorHandlers(editor, e);
   for (const btn of wrap.querySelectorAll("button.mini[data-copy]")) {
-    btn.addEventListener("click", (ev) => {
-      const id = btn.getAttribute("data-copy");
-      copyText(sectionTexts.get(id) || "", ev.currentTarget);
-    });
+    // Take ownership of the text: the row may be reused across renders.
+    const id = btn.getAttribute("data-copy");
+    const text = sectionTexts.get(id) || "";
+    sectionTexts.delete(id);
+    btn.addEventListener("click", (ev) => copyText(text, ev.currentTarget));
   }
   wrap.addEventListener("click", (ev) => {
     const header = ev.target.closest(".jv-header");
@@ -949,17 +1264,54 @@ function fmtUrl(url) {
   }
 }
 
+function responseSize(e) {
+  const cl = getHeader(e.responseHeaders, "content-length");
+  if (cl) {
+    const n = Number(cl);
+    if (!Number.isNaN(n)) return n;
+  }
+  if (e.responseBody?.text != null) {
+    return e.responseBody.base64Encoded
+      ? Math.floor(e.responseBody.text.length * 0.75) // ~decoded byte size
+      : e.responseBody.text.length;
+  }
+  return null;
+}
+
+function formatBytes(n) {
+  if (n == null) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Set by renderList() before rows are built, so the waterfall bars share a scale.
+let renderMaxDur = 1;
+
+function waterfallHtml(e) {
+  if (e.duration == null) return `<span class="wf"></span>`;
+  const total = e.duration;
+  const barPct = Math.max(2, Math.min(100, Math.round((total / (renderMaxDur || 1)) * 100)));
+  const wait = (e.headersReceivedAt && e.startedAt) ? Math.max(0, e.headersReceivedAt - e.startedAt) : 0;
+  const waitPct = total > 0 ? Math.min(100, Math.round((wait / total) * 100)) : 0;
+  return `<span class="wf" title="${total}ms (TTFB ${Math.round(wait)}ms)">` +
+    `<span class="wf-bar" style="width:${barPct}%">` +
+    `<span class="wf-wait" style="width:${waitPct}%"></span></span></span>`;
+}
+
 function entryRow(e) {
   const li = document.createElement("li");
   const isExpanded = state.expandedIds.has(e.id);
   const isSlow = e.duration != null && e.duration >= state.slowThreshold;
   const isStarred = state.starred.has(e.id);
   const isError = e.state === "error" || (e.status != null && e.status >= 400);
+  const isDiffSel = state.diffSelection.includes(e.id);
   li.className = "entry"
     + (isExpanded ? " expanded" : "")
     + (isError ? " error" : "")
     + (isSlow ? " slow" : "")
-    + (isStarred ? " starred" : "");
+    + (isStarred ? " starred" : "")
+    + (isDiffSel ? " diff-selected" : "");
   li.dataset.id = e.id;
 
   const sb = statusBucket(e);
@@ -967,15 +1319,23 @@ function entryRow(e) {
     : e.status != null ? e.status
     : "···";
   const op = gqlOp(e);
+  const wfCell = state.showWaterfall ? waterfallHtml(e) : "";
+  const sizeCell = state.showSize ? `<span class="size">${escapeHtml(formatBytes(responseSize(e)))}</span>` : "";
 
   const main = document.createElement("div");
   main.className = "row-main";
+  main.tabIndex = 0;
+  main.setAttribute("role", "button");
+  main.setAttribute("aria-expanded", String(isExpanded));
+  main.setAttribute("aria-label", `${e.method} ${e.url} — ${statusText}`);
   main.innerHTML = `
     <span class="caret">${icon(isExpanded ? "chevron-down" : "chevron-right")}</span>
-    <span class="star" title="Star (kept across Clear)">${icon(isStarred ? "star-filled" : "star-empty")}</span>
-    <span class="method ${e.method}" data-tip-method="${e.method}">${e.method}</span>
+    <span class="star" role="button" tabindex="0" aria-pressed="${isStarred}" aria-label="Star (kept across Clear)" title="Star (kept across Clear)">${icon(isStarred ? "star-filled" : "star-empty")}</span>
+    <span class="method ${escapeHtml(e.method)}" data-tip-method="${escapeHtml(e.method)}">${escapeHtml(e.method)}</span>
     <span class="status ${sb ? "s" + sb : ""}" data-tip-status="${escapeHtml(e.id)}">${escapeHtml(statusText)}</span>
     <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}</span>
+    ${wfCell}
+    ${sizeCell}
     <span class="duration">${e.duration != null ? e.duration + "ms" : ""}</span>
   `;
 
@@ -983,7 +1343,7 @@ function entryRow(e) {
     if (ev.target.closest(".url") || ev.target.closest(".star")) return;
     if (state.expandedIds.has(e.id)) state.expandedIds.delete(e.id);
     else state.expandedIds.add(e.id);
-    renderList();
+    renderList(e.id);
   });
   main.querySelector(".url").addEventListener("click", async (ev) => {
     ev.stopPropagation();
@@ -994,6 +1354,12 @@ function entryRow(e) {
   main.querySelector(".star").addEventListener("click", (ev) => {
     ev.stopPropagation();
     safePost({ type: "toggleStar", id: e.id });
+  });
+  main.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    if (ev.target.closest(".star")) safePost({ type: "toggleStar", id: e.id });
+    else main.click();
   });
 
   li.appendChild(main);
@@ -1031,8 +1397,19 @@ function renderEmptyState(noEntries) {
   return li;
 }
 
+// Rows are cached and only rebuilt when their entry changed (dirtyIds) or when
+// something affecting every row changed (filters, toggles, stars…): any call
+// without an id. On a busy page this avoids rebuilding 2000 rows — and any
+// expanded JSON tree — on every network event.
+const rowCache = new Map();
+let diffCache = null; // { ids, li }
+const dirtyIds = new Set();
+let fullRenderPending = true;
+
 let renderScheduled = false;
-function renderList() {
+function renderList(changedId, retry = false) {
+  if (changedId != null) dirtyIds.add(changedId);
+  else if (!retry) fullRenderPending = true;
   if (renderScheduled) return;
   renderScheduled = true;
   requestAnimationFrame(() => {
@@ -1044,30 +1421,202 @@ function renderList() {
     );
     if (isTextField && active.closest(".rw-section")) {
       renderScheduled = true;
-      setTimeout(() => { renderScheduled = false; renderList(); }, 500);
+      setTimeout(() => { renderScheduled = false; renderList(null, true); }, 500);
       return;
     }
     sectionTexts.clear();
-    sectionUid = 0;
     const matcher = makeMatcher();
     const visible = state.entries.filter(matcher);
+    const maxDur = visible.reduce((m, e) => (e.duration != null && e.duration > m ? e.duration : m), 1);
+    // Waterfall bars share a scale: a new maximum changes every row.
+    if (state.showWaterfall && maxDur !== renderMaxDur) fullRenderPending = true;
+    renderMaxDur = maxDur;
+    if (fullRenderPending) {
+      rowCache.clear();
+      diffCache = null;
+    } else {
+      for (const id of dirtyIds) rowCache.delete(id);
+      if (diffCache && diffCache.ids.some((id) => dirtyIds.has(id))) diffCache = null;
+    }
+    fullRenderPending = false;
+    dirtyIds.clear();
     const wasAtBottom =
       els.list.scrollTop + els.list.clientHeight >= els.list.scrollHeight - 20;
+    // Emptying the list blurs whatever row had keyboard focus, even when the
+    // same (cached) node is put back: remember it and restore it afterwards.
+    const focus = focusedListTarget();
     els.list.innerHTML = "";
+
+    const diffPanel = renderDiffPanel();
+    if (diffPanel) els.list.appendChild(diffPanel);
+
     if (visible.length === 0) {
       els.list.appendChild(renderEmptyState(state.entries.length === 0));
+    } else if (state.groupByDomain) {
+      els.list.appendChild(renderGrouped(visible));
+      if (wasAtBottom && state.expandedIds.size === 0) els.list.scrollTop = els.list.scrollHeight;
     } else {
       const frag = document.createDocumentFragment();
-      for (const e of visible) frag.appendChild(entryRow(e));
+      for (const e of visible) frag.appendChild(cachedRow(e));
       els.list.appendChild(frag);
       if (wasAtBottom && state.expandedIds.size === 0) {
         els.list.scrollTop = els.list.scrollHeight;
       }
     }
+    if (focus) restoreListFocus(focus);
     els.counts.textContent =
       `${visible.length} shown · ${state.entries.length} captured · ${state.starred.size} starred` +
+      (state.dropped ? ` · ${state.dropped} dropped` : "") +
       (state.paused ? " · PAUSED" : "");
+    updateDiffButton();
   });
+}
+
+function focusedListTarget() {
+  const a = document.activeElement;
+  if (!a || !els.list.contains(a)) return null;
+  if (a.classList.contains("group-header")) return { host: a.dataset.host };
+  const li = a.closest(".entry");
+  if (!li) return null;
+  if (a.classList.contains("star")) return { id: li.dataset.id, sel: ".star" };
+  if (a.classList.contains("row-main")) return { id: li.dataset.id, sel: ".row-main" };
+  return null; // focus inside a detail panel: cached node, left alone
+}
+
+function restoreListFocus(f) {
+  let el = null;
+  if (f.host != null) {
+    el = [...els.list.querySelectorAll(".group-header")].find((h) => h.dataset.host === f.host);
+  } else {
+    const li = [...els.list.querySelectorAll(".entry")].find((x) => x.dataset.id === f.id);
+    el = li?.querySelector(f.sel);
+  }
+  el?.focus({ preventScroll: true });
+}
+
+function cachedRow(e) {
+  let li = rowCache.get(e.id);
+  if (!li) {
+    li = entryRow(e);
+    rowCache.set(e.id, li);
+  }
+  return li;
+}
+
+function renderGrouped(visible) {
+  const frag = document.createDocumentFragment();
+  const groups = new Map();
+  for (const e of visible) {
+    const h = tryHost(e.url) || "(no host)";
+    if (!groups.has(h)) groups.set(h, []);
+    groups.get(h).push(e);
+  }
+  for (const [host, entries] of groups) {
+    const collapsed = state.collapsedHosts.has(host);
+    const header = document.createElement("li");
+    header.className = "group-header" + (collapsed ? " collapsed" : "");
+    header.tabIndex = 0;
+    header.setAttribute("role", "button");
+    header.setAttribute("aria-expanded", String(!collapsed));
+    header.dataset.host = host;
+    header.innerHTML =
+      `<span class="group-caret">${icon(collapsed ? "chevron-right" : "chevron-down")}</span>` +
+      `<span class="group-host">${escapeHtml(host)}</span>` +
+      `<span class="group-count">${entries.length}</span>`;
+    header.addEventListener("click", () => {
+      if (state.collapsedHosts.has(host)) state.collapsedHosts.delete(host);
+      else state.collapsedHosts.add(host);
+      renderList();
+    });
+    header.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      ev.preventDefault();
+      header.click();
+    });
+    frag.appendChild(header);
+    if (!collapsed) for (const e of entries) frag.appendChild(cachedRow(e));
+  }
+  return frag;
+}
+
+// ─── diff of two selected requests ─────────────────────────────────────────
+
+function lineDiff(a, b) {
+  const A = a.split("\n"), B = b.split("\n");
+  const n = A.length, m = B.length;
+  // LCS is O(n*m) in space — fall back to a naive block diff for huge inputs.
+  if (n > 1500 || m > 1500) {
+    return [...A.map((s) => ({ t: "del", s })), ...B.map((s) => ({ t: "add", s }))];
+  }
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push({ t: "eq", s: A[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: "del", s: A[i] }); i++; }
+    else { out.push({ t: "add", s: B[j] }); j++; }
+  }
+  while (i < n) out.push({ t: "del", s: A[i++] });
+  while (j < m) out.push({ t: "add", s: B[j++] });
+  return out;
+}
+
+function diffBlockHtml(title, aText, bText) {
+  if ((aText || "") === (bText || "")) {
+    return `<div class="diff-block"><div class="diff-title">${escapeHtml(title)} <span class="diff-same">identical</span></div></div>`;
+  }
+  const rows = lineDiff(aText || "", bText || "");
+  const body = rows.map((r) => {
+    const sign = r.t === "add" ? "+" : r.t === "del" ? "−" : " ";
+    return `<div class="diff-line ${r.t}">${sign} ${escapeHtml(r.s)}</div>`;
+  }).join("");
+  return `<div class="diff-block"><div class="diff-title">${escapeHtml(title)}</div><div class="diff-lines">${body}</div></div>`;
+}
+
+function entryHeadersText(headers) {
+  return (headers || []).map((h) => `${h.name}: ${h.value ?? ""}`).join("\n");
+}
+
+function entryBodyPretty(e, which) {
+  const raw = which === "req" ? bodyToText(e.requestBody) : (e.responseBody?.text || "");
+  return tryPrettyJson(raw) || raw;
+}
+
+function shortUrl(url) {
+  try { const u = new URL(url); return u.host + u.pathname; } catch { return url; }
+}
+
+function renderDiffPanel() {
+  // Drop any selected ids that no longer exist (cleared/re-imported).
+  state.diffSelection = state.diffSelection.filter((id) => state.byId.has(id));
+  if (state.diffSelection.length !== 2) return null;
+  if (diffCache && diffCache.ids.join() === state.diffSelection.join()) return diffCache.li;
+  const [a, b] = state.diffSelection.map((id) => state.byId.get(id));
+  const li = document.createElement("li");
+  li.className = "diff-panel";
+  li.innerHTML = `
+    <div class="diff-head">
+      <span class="diff-head-title">${icon("diff")}Diff</span>
+      <span class="diff-legend"><b class="diff-a">A</b> ${escapeHtml(a.method)} ${escapeHtml(shortUrl(a.url))} &nbsp;·&nbsp; <b class="diff-b">B</b> ${escapeHtml(b.method)} ${escapeHtml(shortUrl(b.url))}</span>
+      <button class="mini diff-close" title="Close diff">${icon("close")}</button>
+    </div>
+    <div class="diff-body">
+      ${diffBlockHtml("Status", `${a.method} ${a.status ?? a.state}`, `${b.method} ${b.status ?? b.state}`)}
+      ${diffBlockHtml("URL", a.url, b.url)}
+      ${diffBlockHtml("Request headers", entryHeadersText(a.requestHeaders), entryHeadersText(b.requestHeaders))}
+      ${diffBlockHtml("Response headers", entryHeadersText(a.responseHeaders), entryHeadersText(b.responseHeaders))}
+      ${diffBlockHtml("Request body", entryBodyPretty(a, "req"), entryBodyPretty(b, "req"))}
+      ${diffBlockHtml("Response body", entryBodyPretty(a, "resp"), entryBodyPretty(b, "resp"))}
+    </div>`;
+  li.querySelector(".diff-close").addEventListener("click", () => {
+    state.diffSelection = [];
+    renderList();
+  });
+  diffCache = { ids: [...state.diffSelection], li };
+  return li;
 }
 
 function trackHost(e) {
@@ -1078,6 +1627,22 @@ function trackHost(e) {
   }
 }
 
+function removeEntries(ids) {
+  const gone = new Set(ids);
+  state.entries = state.entries.filter((e) => !gone.has(e.id));
+  for (const id of gone) {
+    state.byId.delete(id);
+    rowCache.delete(id);
+    state.expandedIds.delete(id);
+    state.replays.delete(id);
+    state.replayWithOpen.delete(id);
+    state.replayDrafts.delete(id);
+    state.decodedBase64.delete(id);
+  }
+  // No render here: the caller's upsert() renders right after, and evicted
+  // rows simply drop out of the visible list.
+}
+
 function upsert(entry) {
   const existing = state.byId.get(entry.id);
   if (existing) Object.assign(existing, entry);
@@ -1086,14 +1651,17 @@ function upsert(entry) {
     state.entries.push(entry);
     trackHost(entry);
   }
-  renderList();
+  renderList(entry.id);
 }
 
 // ─── port ────────────────────────────────────────────────────────────────
 // The background service worker is shut down after ~30s of inactivity in MV3.
-// When that happens, our port is invalidated. We reconnect on demand.
+// When that happens, our port is invalidated. We reconnect right away: the
+// connect wakes the worker back up and it answers with a fresh snapshot, so
+// the panel keeps receiving live updates.
 
 let port = null;
+let reconnectTimer = null;
 
 function handlePortMessage(msg) {
   if (msg.type === "snapshot") {
@@ -1104,12 +1672,16 @@ function handlePortMessage(msg) {
     state.paused = msg.paused;
     state.scope = msg.scope;
     state.captureBodies = !!msg.captureBodies;
+    if (typeof msg.dropped === "number") state.dropped = msg.dropped;
     syncControls();
     refreshDomainOptions();
     renderList();
   } else if (msg.type === "add" || msg.type === "update") {
+    if (typeof msg.dropped === "number") state.dropped = msg.dropped;
+    if (msg.evicted?.length) removeEntries(msg.evicted);
     upsert(msg.entry);
   } else if (msg.type === "cleared") {
+    if (typeof msg.dropped === "number") state.dropped = msg.dropped;
     state.entries = (msg.entries || []).slice();
     state.byId = new Map(state.entries.map((e) => [e.id, e]));
     state.expandedIds = new Set([...state.expandedIds].filter((id) => state.byId.has(id)));
@@ -1134,7 +1706,11 @@ function handlePortMessage(msg) {
 function connectPort() {
   port = chrome.runtime.connect({ name: "sidewire" });
   port.onMessage.addListener(handlePortMessage);
-  port.onDisconnect.addListener(() => { port = null; });
+  port.onDisconnect.addListener(() => {
+    port = null;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { if (!port) connectPort(); }, 250);
+  });
   return port;
 }
 
@@ -1176,6 +1752,7 @@ els.scope.addEventListener("change", () => {
 els.urlFilter.addEventListener("input", () => {
   state.urlFilter = els.urlFilter.value;
   els.urlFilterClear.hidden = !els.urlFilter.value;
+  savePrefs();
   renderList();
 });
 els.urlFilterClear.addEventListener("click", () => {
@@ -1183,26 +1760,42 @@ els.urlFilterClear.addEventListener("click", () => {
   state.urlFilter = "";
   els.urlFilterClear.hidden = true;
   els.urlFilter.focus();
+  savePrefs();
   renderList();
 });
 els.statusFilter.addEventListener("change", () => {
   state.statusFilter = els.statusFilter.value;
+  savePrefs();
   renderList();
 });
 els.domainFilter.addEventListener("change", () => {
   state.domainFilter = els.domainFilter.value;
+  savePrefs();
   renderList();
 });
 els.starredOnly.addEventListener("change", () => {
   state.starredOnly = els.starredOnly.checked;
+  savePrefs();
   renderList();
 });
 els.slowThreshold.addEventListener("input", () => {
   state.slowThreshold = Number(els.slowThreshold.value) || 0;
+  savePrefs();
   renderList();
 });
-els.captureBodies.addEventListener("change", () => {
-  safePost({ type: "setCaptureBodies", value: els.captureBodies.checked });
+els.captureBodies.addEventListener("change", async () => {
+  const want = els.captureBodies.checked;
+  if (want) {
+    // `debugger` is optional: ask for it on first use. Must run directly in the
+    // user gesture, before any other await.
+    let granted = false;
+    try { granted = await chrome.permissions.request({ permissions: ["debugger"] }); } catch {}
+    if (!granted) {
+      els.captureBodies.checked = false;
+      return;
+    }
+  }
+  safePost({ type: "setCaptureBodies", value: want });
 });
 els.copyAll.addEventListener("click", async () => {
   const urls = state.entries.filter(makeMatcher()).map((e) => e.url).join("\n");
@@ -1226,6 +1819,61 @@ els.exportHar.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+// ─── HAR import ──────────────────────────────────────────────────────────
+
+function flashImport(msg) {
+  els.importHar.innerHTML = `<span>${escapeHtml(msg)}</span>`;
+  setTimeout(() => {
+    els.importHar.innerHTML = `${icon("upload")}<span>Import</span>`;
+  }, 1400);
+}
+
+els.importHar.addEventListener("click", () => els.harFileInput.click());
+els.harFileInput.addEventListener("change", async () => {
+  const file = els.harFileInput.files?.[0];
+  els.harFileInput.value = ""; // let the same file be re-imported later
+  if (!file) return;
+  try {
+    const har = JSON.parse(await file.text());
+    const entries = harToEntries(har, Date.now());
+    if (!entries.length) { flashImport("Empty HAR"); return; }
+    // Make imported resource types visible even if their chip was off.
+    for (const e of entries) state.types.add(e.type);
+    renderChips(els.typeChips, TYPES, state.types);
+    savePrefs();
+    safePost({ type: "importEntries", entries });
+    flashImport(`+${entries.length} imported`);
+  } catch (err) {
+    console.warn("sidewire: HAR import failed", err);
+    flashImport("Invalid HAR");
+  }
+});
+
+// ─── diff selection ──────────────────────────────────────────────────────
+
+function toggleDiffSelection(id) {
+  const idx = state.diffSelection.indexOf(id);
+  if (idx !== -1) state.diffSelection.splice(idx, 1);
+  else {
+    state.diffSelection.push(id);
+    if (state.diffSelection.length > 2) state.diffSelection.shift();
+  }
+  renderList();
+}
+
+function updateDiffButton() {
+  const n = state.diffSelection.length;
+  els.diffBtn.hidden = n === 0;
+  els.diffBtn.innerHTML = `${icon("diff")}<span>Diff ${n}/2</span>`;
+  els.diffBtn.classList.toggle("active", n === 2);
+}
+
+els.diffBtn.addEventListener("click", () => {
+  if (state.diffSelection.length === 2) return; // panel already shown
+  state.diffSelection = [];
+  renderList();
+});
+
 // ─── hotkeys ─────────────────────────────────────────────────────────────
 
 document.addEventListener("keydown", (ev) => {
@@ -1238,8 +1886,20 @@ document.addEventListener("keydown", (ev) => {
     if (document.activeElement === els.urlFilter) {
       els.urlFilter.value = "";
       state.urlFilter = "";
+      els.urlFilterClear.hidden = true;
+      savePrefs();
       renderList();
       els.urlFilter.blur();
+    }
+  } else if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && ev.target.matches(".row-main, .group-header")) {
+    // Move between rows (and group headers) with the arrow keys.
+    ev.preventDefault();
+    const items = [...els.list.querySelectorAll(".row-main, .group-header")];
+    const i = items.indexOf(ev.target);
+    const next = items[i + (ev.key === "ArrowDown" ? 1 : -1)];
+    if (next) {
+      next.focus();
+      next.scrollIntoView({ block: "nearest" });
     }
   } else if (ev.key === "p" && !inField) {
     safePost({ type: "setPaused", value: !state.paused });

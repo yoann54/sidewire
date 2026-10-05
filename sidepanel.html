@@ -16,8 +16,9 @@
       </svg>
       Sidewire
     </span>
-    <span class="version">v0.5.0</span>
+    <span class="version">v0.7.0</span>
     <span class="spacer"></span>
+    <button id="donate" class="icon-btn" title="Support Sidewire (opens PayPal)"></button>
     <button id="themeToggle" class="icon-btn" title="Toggle theme"></button>
   </div>
 
@@ -27,6 +28,9 @@
       <button id="clear" class="btn" title="Clear unstarred entries"></button>
       <button id="copyAll" class="btn" title="Copy all visible URLs"></button>
       <button id="exportHar" class="btn" title="Export visible entries as HAR"></button>
+      <button id="importHar" class="btn" title="Import a .har file"></button>
+      <input id="harFileInput" type="file" accept=".har,application/json,.json" hidden>
+      <button id="diffBtn" class="btn" title="Compare the two selected requests" hidden></button>
       <span class="spacer"></span>
       <select id="scope" title="Capture scope">
         <option value="active">Active tab</option>
@@ -37,7 +41,7 @@
     <div class="row">
       <div class="search">
         <span id="urlFilterIcon" class="search-icon"></span>
-        <input id="urlFilter" type="text" placeholder="Filter URL (substring or /regex/) — press / to focus" />
+        <input id="urlFilter" type="text" placeholder="Filter — terms, -exclude, or /regex/ · press / to focus" />
         <button id="urlFilterClear" class="search-clear" type="button" title="Clear filter" hidden></button>
       </div>
       <select id="statusFilter">
@@ -70,6 +74,24 @@
       </label>
       <label class="check" title="Auto-decode JWT tokens found in request/response headers">
         <input type="checkbox" id="decodeJwtToggle"> Decode JWT in headers
+      </label>
+      <label class="check" title="Also match the URL filter against headers and request/response bodies">
+        <input type="checkbox" id="searchBodies"> Search bodies/headers
+      </label>
+      <label class="check" title="Flag auth headers, cookies and insecure Set-Cookie flags">
+        <input type="checkbox" id="flagSecrets"> Flag secrets
+      </label>
+      <label class="check" title="Replace Authorization, Cookie, Set-Cookie, API-key… header values with [redacted] in exported HAR files">
+        <input type="checkbox" id="redactHar"> Redact secrets in HAR
+      </label>
+      <label class="check" title="Show a response size column">
+        <input type="checkbox" id="showSize"> Size
+      </label>
+      <label class="check" title="Show a mini request timeline (waterfall)">
+        <input type="checkbox" id="showWaterfall"> Timeline
+      </label>
+      <label class="check" title="Group requests by domain">
+        <input type="checkbox" id="groupByDomain"> Group by domain
       </label>
     </div>
 

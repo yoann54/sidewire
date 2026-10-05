@@ -40,29 +40,40 @@ Capture, filter, replay and export requests while keeping your browser layout in
 
 FEATURES
 • Capture in the active tab (default) or all tabs, with pause/resume and clear (starred entries are kept)
-• Filters: URL substring or /regex/, HTTP method, resource type, status bucket (2xx/3xx/4xx/5xx/errors), domain dropdown, "★ only" toggle
+• Filters: URL terms with AND + "-" exclusion (e.g. "api -analytics -.png") or /regex/, HTTP method, resource type, status bucket (2xx/3xx/4xx/5xx/errors), domain dropdown, "★ only" toggle
+• Search inside headers and request/response bodies (optional toggle), not just the URL
+• Group requests by domain in collapsible sections
+• Optional response-size column and a compact request timeline (waterfall) with a shared time scale
+• Flag secrets — highlight sensitive headers (Authorization, Cookie, API keys…) and Set-Cookie values missing Secure/HttpOnly
 • Slow-request highlight with a configurable threshold
 • Star entries (☆/★) — preserved across Clear
 • GraphQL operationName auto-extracted from POST bodies and shown as a badge
 • Click a row to expand: query params, parsed request/response headers, request body (formData or raw, JSON pretty-printed), response body (when capture enabled), timing breakdown
-• Copy URL, Copy as cURL, Copy as fetch, Copy all visible URLs
-• HAR export — open in DevTools, Postman, Insomnia…
+• Diff two requests side by side (headers + bodies, line-level)
+• Copy URL, Copy as cURL, Copy as fetch, Copy as PowerShell, Copy as node fetch, Copy all visible URLs
+• HAR export and HAR import — round-trip with DevTools, Postman, Insomnia…
+• Sensitive header values (Authorization, Cookie, API keys…) redacted in exported HAR files by default
 • Replay — re-fire a captured request and see the response inline
 • Replay with… — open an inline editor to toggle/edit/add query parameters and edit the body (JSON pretty-print) before re-firing
 • Decode base64 response bodies in one click; JSON pretty-printed automatically when decoded
 • Optional JWT decoding — auto-shows the decoded header/payload JSON under any JWT-shaped header value (Authorization: Bearer …, etc.)
 • Light / dark theme — toggle in the title bar, follows OS preference by default
-• Optional response-body capture via chrome.debugger (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
-• Persistence — buffer kept in chrome.storage.session, survives service-worker restarts
+• Optional response-body capture via chrome.debugger — the permission is only requested when you turn it on (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
+• Filters and display preferences are remembered between sessions
+• Persistence — request buffer kept in chrome.storage.session, survives service-worker restarts (response bodies stay in memory only, never written to storage)
 • Hotkeys: / focus URL filter, Esc clear filter, P pause/resume
 
 PRIVACY
 Sidewire does not send any data anywhere. Captured request/response metadata stays inside your browser's session storage and is discarded when the browser closes. No analytics, no telemetry, no remote endpoints.
 
 LIMITATIONS
-• Response bodies require enabling the chrome.debugger toggle (Chrome's built-in debugger notification bar will appear on the inspected tab while attached). Correlation between webRequest and CDP is by URL match, so identical concurrent requests may have their bodies attached to the wrong entry.
+• Response bodies require enabling the chrome.debugger toggle (Chrome's built-in debugger notification bar will appear on the inspected tab while attached). Correlation between webRequest and CDP matches on tab, URL, method and closest request time — a heuristic, so identical concurrent requests to the same URL may still occasionally have their bodies attached to the wrong entry.
 • Replay runs from the extension origin; some headers (Cookie, Origin, Host, Referer, …) are forbidden by the fetch spec and silently dropped.
-• Buffer capped at 2000 entries; oldest non-starred dropped first.
+• Response bodies larger than 1 MB, and image/media/font bodies, are not captured.
+• Buffer capped at 2000 entries; oldest non-starred dropped first (a "dropped" counter is shown once eviction starts).
+
+SUPPORT
+Sidewire is free and every feature is available to everyone. If it saves you time, there's an optional "tip" button (heart icon in the title bar) that opens paypal.me/yoadadev in a new tab. Donations are entirely optional and unlock nothing.
 ```
 
 ---
@@ -89,19 +100,14 @@ Required to observe HTTP/HTTPS request and response metadata (URL, method, statu
 The extension's entire UI lives in a Chrome side panel. This permission is required to register and open that panel.
 ```
 
-### `tabs`
-```
-Used to identify the active tab when the user selects "Active tab" capture scope, and to attach the optional debugger session to that tab. No tab content is read.
-```
-
 ### `storage`
 ```
-Used to persist the in-memory request buffer in chrome.storage.session so that the side panel survives service-worker restarts during a browsing session. Also used to persist non-sensitive UI preferences (theme: light/dark, JWT-decoding toggle) in chrome.storage.local — no captured request data is written there. Nothing is written to chrome.storage.sync.
+Used to persist the request buffer in chrome.storage.session so that the side panel survives service-worker restarts during a browsing session (response bodies are held in memory only and are never written to storage). Also used to persist non-sensitive UI preferences (theme, active filters, and display toggles) in chrome.storage.local — no captured request data is written there. Nothing is written to chrome.storage.sync.
 ```
 
 ### `debugger`
 ```
-Optional. Attached only when the user enables the "Capture response bodies" toggle. It is required because Chrome's webRequest API does not expose response bodies; the Chrome DevTools Protocol does. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when the toggle is turned off or the tab closes.
+Declared as an optional permission: it is not granted at install time and is requested through chrome.permissions.request only when the user first enables the "Capture response bodies" toggle. Attached only when the user enables the "Capture response bodies" toggle. It is required because Chrome's webRequest API does not expose response bodies; the Chrome DevTools Protocol does. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when the toggle is turned off or the tab closes.
 ```
 
 ### Host permissions: `<all_urls>`
