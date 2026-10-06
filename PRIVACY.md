@@ -4,9 +4,9 @@ title: Sidewire — Privacy Policy
 
 # Sidewire — Privacy Policy
 
-_Last updated: 2026-10-05_
+_Last updated: 2026-10-06_
 
-_Applies to Sidewire version 0.7.0._
+_Applies to Sidewire version 0.8.0._
 
 Sidewire is a Chrome extension that displays the network traffic of the tabs you are actively capturing inside a side panel, as a developer tool.
 
@@ -21,14 +21,15 @@ While you have capture enabled, Sidewire reads the following from the tabs in sc
 - Request URL, method, resource type, status code, timings
 - Request and response headers
 - Request body (form data or raw, when present)
-- Response body — **only** when you explicitly enable the "Capture response bodies (debugger)" toggle, which attaches `chrome.debugger` to the active tab. The `debugger` permission is not granted at install time: Chrome asks you for it the first time you enable this toggle. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
+- Response body and WebSocket / Server-Sent Events messages — **only** when you explicitly enable the "Capture bodies & messages (debugger)" toggle, which attaches `chrome.debugger` to the active tab. The `debugger` permission is not granted at install time: Chrome asks you for it the first time you enable a feature that needs it. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
+- Requests matching a mock rule — **only** while "Mocking active" is on. The debugger is then used to answer, delay or fail those requests locally, as your rules describe. Nothing is sent anywhere: a mocked response is produced inside your browser.
 
 This is the same kind of information you would see in Chrome's built-in DevTools Network panel.
 
 ## What the extension stores
 
-- A rolling buffer of captured entries (capped at 2,000) is kept in `chrome.storage.session` so that the side panel survives service-worker restarts. Response bodies are held in memory only and are **not** written to `chrome.storage.session`; bodies larger than 1 MB, as well as images, media and fonts, are not captured at all. The capture state (paused, scope) is also kept there. `chrome.storage.session` is cleared automatically by Chrome when the browser closes.
-- `chrome.storage.local` is used **only** to persist UI preferences: theme, display toggles, and the active filters (filter text you typed, selected status/methods/types, and — if you picked one — the selected domain in the domain filter). No captured requests, headers or bodies are written to it.
+- A rolling buffer of captured entries (capped at 2,000) is kept in `chrome.storage.session` so that the side panel survives service-worker restarts. Response bodies and WebSocket/SSE messages are held in memory only and are **not** written to `chrome.storage.session`; bodies larger than 1 MB, as well as images, media and fonts, are not captured at all. The capture state (paused, scope, mocking on/off) and the per-tab failed-request counts shown on the toolbar badge are also kept there. `chrome.storage.session` is cleared automatically by Chrome when the browser closes.
+- `chrome.storage.local` is used **only** to persist UI preferences — theme, display toggles, and the active filters (filter text you typed, selected status/methods/types, and — if you picked one — the selected domain in the domain filter) — and the mock rules you write (URL pattern, method, and the status, headers and body you entered). No captured requests, headers or bodies are written to it, except what you choose to copy into a mock rule.
 - The extension does **not** write to `chrome.storage.sync`.
 - The extension does **not** use cookies, IndexedDB, or any other persistent client-side storage.
 
@@ -49,8 +50,8 @@ The "HAR import" feature reads a `.har` file you select from your local file sys
 |---|---|
 | `webRequest` | Read request/response metadata (URL, headers, status, timings) from tabs in capture scope |
 | `sidePanel` | Render the extension's UI in Chrome's side panel |
-| `storage` | Persist the rolling buffer in `chrome.storage.session` and UI preferences (theme, filters, display toggles) in `chrome.storage.local` |
-| `debugger` | Optional permission, requested only when you first enable the toggle — attached only while the "Capture response bodies" toggle is on, to read response bodies via the Chrome DevTools Protocol |
+| `storage` | Persist the rolling buffer in `chrome.storage.session`, and UI preferences (theme, filters, display toggles) and mock rules in `chrome.storage.local` |
+| `debugger` | Optional permission, requested only when you first enable body capture or mocks — attached only while one of them is on, to read response bodies and WebSocket/SSE messages and to apply your mock rules via the Chrome DevTools Protocol |
 | `<all_urls>` host access | Allow the above to observe whichever site you choose to inspect |
 
 ## Third parties

@@ -53,15 +53,19 @@ FEATURES
 • Copy URL, Copy as cURL, Copy as fetch, Copy as PowerShell, Copy as node fetch, Copy all visible URLs
 • HAR export and HAR import — round-trip with DevTools, Postman, Insomnia…
 • Sensitive header values (Authorization, Cookie, API keys…) redacted in exported HAR files by default
+• Mocks — answer matching requests with your own status, headers and body, delay them, or make them fail; create a rule from any captured request in one click (uses chrome.debugger, optional permission)
+• WebSocket and Server-Sent Events messages listed under each connection (with response-body capture on)
+• Error badge on the toolbar icon: failed requests (4xx/5xx/network errors) on the current page, reset on navigation
+• Navigation separators mark each page load in the list
 • Replay — re-fire a captured request and see the response inline
 • Replay with… — open an inline editor to toggle/edit/add query parameters and edit the body (JSON pretty-print) before re-firing
 • Decode base64 response bodies in one click; JSON pretty-printed automatically when decoded
 • Optional JWT decoding — auto-shows the decoded header/payload JSON under any JWT-shaped header value (Authorization: Bearer …, etc.)
 • Light / dark theme — toggle in the title bar, follows OS preference by default
-• Optional response-body capture via chrome.debugger — the permission is only requested when you turn it on (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
+• Optional response-body capture via chrome.debugger — the permission is only requested when you first turn on body capture or mocks (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
 • Filters and display preferences are remembered between sessions
 • Persistence — request buffer kept in chrome.storage.session, survives service-worker restarts (response bodies stay in memory only, never written to storage)
-• Hotkeys: / focus URL filter, Esc clear filter, P pause/resume
+• Keyboard: / focus URL filter, Esc clear filter, P pause/resume, arrow keys between rows, Enter/Space to expand rows and JSON nodes
 
 PRIVACY
 Sidewire does not send any data anywhere. Captured request/response metadata stays inside your browser's session storage and is discarded when the browser closes. No analytics, no telemetry, no remote endpoints.
@@ -81,7 +85,7 @@ Sidewire is free and every feature is available to everyone. If it saves you tim
 ## Single purpose (required field)
 
 ```
-Sidewire captures network requests from the user's tabs and presents them in the browser's side panel for inspection, filtering, replay and export — providing DevTools-like network observation without requiring DevTools to be open.
+Sidewire captures network requests from the user's tabs and presents them in the browser's side panel for inspection, filtering, replay, mocking and export — providing DevTools-like network debugging without requiring DevTools to be open.
 ```
 
 ---
@@ -102,12 +106,12 @@ The extension's entire UI lives in a Chrome side panel. This permission is requi
 
 ### `storage`
 ```
-Used to persist the request buffer in chrome.storage.session so that the side panel survives service-worker restarts during a browsing session (response bodies are held in memory only and are never written to storage). Also used to persist non-sensitive UI preferences (theme, active filters, and display toggles) in chrome.storage.local — no captured request data is written there. Nothing is written to chrome.storage.sync.
+Used to persist the request buffer in chrome.storage.session so that the side panel survives service-worker restarts during a browsing session (response bodies are held in memory only and are never written to storage). Also used to persist non-sensitive UI preferences (theme, active filters, and display toggles) and the mock rules the user writes in chrome.storage.local — no captured request data is written there. Nothing is written to chrome.storage.sync.
 ```
 
 ### `debugger`
 ```
-Declared as an optional permission: it is not granted at install time and is requested through chrome.permissions.request only when the user first enables the "Capture response bodies" toggle. Attached only when the user enables the "Capture response bodies" toggle. It is required because Chrome's webRequest API does not expose response bodies; the Chrome DevTools Protocol does. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when the toggle is turned off or the tab closes.
+Declared as an optional permission: it is not granted at install time and is requested through chrome.permissions.request only when the user first enables a feature that needs it ("Capture bodies & messages" or "Mocks"). The debugger is attached to the active tab only while one of these features is on, for two uses: (1) reading response bodies and WebSocket / Server-Sent Events messages (Network domain), which Chrome's webRequest API does not expose; (2) answering, delaying or failing requests that match mock rules the user wrote (Fetch domain) — webRequest in Manifest V3 cannot modify responses. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when both features are turned off; dismissing the notification bar turns them off.
 ```
 
 ### Host permissions: `<all_urls>`
@@ -133,7 +137,7 @@ Tick / answer the dashboard form as follows:
 | Location | No | |
 | Web history | No | The extension shows network requests for tabs the user is actively capturing; this data is never persisted beyond `chrome.storage.session` and never transmitted off-device |
 | User activity | No | Same as above |
-| Website content | No | Response bodies (when the user explicitly enables debugger capture) are kept local and never transmitted |
+| Website content | No | Response bodies and WebSocket/SSE messages (when the user explicitly enables debugger capture) are kept in memory only and never transmitted |
 
 **Certifications** (tick all three):
 

@@ -79,7 +79,7 @@ html, body {
 }
 body { display: flex; flex-direction: column; }
 
-header {
+body > header {
   padding: var(--sp-3);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -172,6 +172,8 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible {
 .row-main:focus-visible,
 .star:focus-visible,
 .group-header:focus-visible,
+.jv-header:focus-visible,
+.frame > summary:focus-visible,
 .mini:focus-visible,
 .icon-btn:focus-visible {
   outline: 2px solid var(--accent);
@@ -999,3 +1001,116 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible {
 .diff-line.del { background: rgba(244, 135, 113, 0.12); color: var(--c-red); }
 .theme-light .diff-line.add { background: rgba(28, 122, 100, 0.12); }
 .theme-light .diff-line.del { background: rgba(200, 68, 43, 0.12); }
+
+/* ───── Row badges: mocked requests, WebSocket/SSE message count ───── */
+.mock-badge,
+.frame-count {
+  font-size: 9px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+.mock-badge { color: var(--c-orange); background: rgba(224, 167, 58, 0.16); }
+.frame-count { color: var(--c-green); background: rgba(78, 201, 176, 0.12); font-weight: 500; }
+
+.mock-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--sp-3);
+  padding: 5px var(--sp-2);
+  border: 1px solid rgba(224, 167, 58, 0.4);
+  border-radius: var(--r-md);
+  background: rgba(224, 167, 58, 0.08);
+  color: var(--c-orange);
+  font-family: var(--font-sans);
+}
+.mock-note code { font-family: var(--font-mono); color: var(--fg); }
+
+/* ───── Mocks panel (header) ───── */
+.mocks.live > summary { color: var(--c-orange); font-weight: 600; }
+.mocks-body { max-height: 45vh; overflow-y: auto; margin-top: var(--sp-1); }
+.mock-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.mock-rule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-deep);
+  font-size: 11px;
+}
+.mock-rule.disabled { opacity: 0.55; }
+.mock-line {
+  display: grid;
+  grid-template-columns: 16px auto 1fr auto 24px;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.mock-line input[type="checkbox"] { margin: 0; }
+.mock-line input[type="text"] { min-width: 0; font-family: var(--font-mono); font-size: 11px; padding: 3px 6px; }
+.mock-line select { padding: 3px 4px; font-size: 11px; }
+.mock-line button.mini { padding: 3px; }
+.mock-field { display: flex; align-items: center; gap: var(--sp-1); color: var(--fg-muted); }
+.mock-field input { width: 80px; padding: 3px 6px; }
+.mock-label { color: var(--fg-muted); margin-top: 2px; }
+.mock-hint { color: var(--fg-faint); font-style: italic; font-size: 10px; }
+.mock-rule .rw-body { min-height: 0; }
+
+/* ───── WebSocket / SSE messages ───── */
+.frames { display: flex; flex-direction: column; }
+.frame { border-bottom: 1px solid var(--border); }
+.frame:last-child { border-bottom: none; }
+.frame > summary {
+  display: grid;
+  grid-template-columns: 12px auto auto 1fr auto;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: 2px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.frame > summary::-webkit-details-marker { display: none; }
+.frame > summary:hover { background: var(--surface-hover); }
+.frame-dir { font-weight: 700; text-align: center; }
+.frame.out .frame-dir { color: var(--accent); }
+.frame.in .frame-dir { color: var(--c-green); }
+.frame.err .frame-dir, .frame.err .frame-preview { color: var(--c-red); }
+.frame-time, .frame-size { color: var(--fg-faint); font-size: 10px; white-space: nowrap; }
+.frame-kind {
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+}
+.frame-kind:empty { display: none; }
+.frame-preview { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.frame > pre { margin: 2px 0 var(--sp-2) 20px; white-space: pre-wrap; word-break: break-all; }
+
+/* ───── Navigation separators ───── */
+.nav-sep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--sp-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+.nav-sep .ico { width: 11px; height: 11px; color: var(--accent); }
+.nav-sep-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-link); }
+.nav-sep-time { color: var(--fg-faint); font-family: var(--font-mono); }
+
+/* Debugger attach failure, shown under the toolbar for a few seconds. */
+#counts.has-error::after {
+  content: attr(data-error);
+  display: block;
+  color: var(--c-red);
+}

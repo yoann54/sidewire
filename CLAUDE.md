@@ -34,6 +34,15 @@ Le repo distant est `git@github.com:yoann54/sidewire.git` (`origin`, `main` déj
 - Perf : bodies > 1 Mo et images/media/fonts non capturés ; lignes et panneau de diff mis en cache (`rowCache`, `renderList(id)` ne reconstruit que la ligne concernée) ; le panneau retire les entrées évincées par le SW
 - Accessibilité : puces méthodes/types en `<button aria-pressed>` ; lignes, étoiles et en-têtes de groupe focusables (Entrée/Espace), ↑/↓ entre les lignes, focus restauré après chaque rendu, contour `:focus-visible`. Non traité : nœuds de l'arbre JSON (clic souris uniquement)
 
+### v0.8.0 (2026-10-06)
+- **Mocks** (CDP `Fetch`) : panneau « Mocks » dans le header + bouton « Mock » sur une entrée (pré-remplit URL + réponse). Actions : répondre (status/headers/body), retarder, faire échouer. Règles en `storage.local`, interrupteur maître `mocksOn` en `storage.session`. Les entrées mockées portent `e.mock` → badge MOCK/DELAYED/BLOCKED
+- **Messages WebSocket / SSE** (CDP `Network`, avec la capture des bodies) : `e.frames` (500 max, 64 Ko/payload, jamais persistés), message `frame` du SW vers le panneau
+- **Badge d'erreurs** sur l'icône (4xx/5xx/erreurs réseau par onglet, remis à zéro au `main_frame`, `favicon.ico` ignoré)
+- **Séparateurs de navigation** dans la liste (hors « Group by domain »)
+- Arbre JSON navigable au clavier ; correctif CSS : la règle `header` globale cassait les en-têtes de section du détail
+- `syncDebugger()` dans `background.js` décide seul d'attacher/détacher (bodies **ou** mocks) et active `Network`/`Fetch` selon le besoin
+- `store/listing.md` + `PRIVACY.md` mis à jour (nouvel usage de `debugger`) → **à recopier dans le dashboard** avant de soumettre
+
 ## Publication
 
 - **Publiée** sur le Chrome Web Store (ID `mkhgmicflbbhfohnkpkmcnkdjhipdfmk`), v0.6.0 en ligne au 2026-10-05

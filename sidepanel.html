@@ -16,7 +16,7 @@
       </svg>
       Sidewire
     </span>
-    <span class="version">v0.7.0</span>
+    <span class="version">v0.8.0</span>
     <span class="spacer"></span>
     <button id="donate" class="icon-btn" title="Support Sidewire (opens PayPal)"></button>
     <button id="themeToggle" class="icon-btn" title="Toggle theme"></button>
@@ -68,9 +68,23 @@
       <div class="chips" id="typeChips"></div>
     </details>
 
+    <details class="filters mocks" id="mocksPanel">
+      <summary id="mocksSummary">Mocks</summary>
+      <div class="mocks-body">
+        <div class="row small">
+          <label class="check" title="Intercept matching requests in the active tab with chrome.debugger (Chrome shows its debugger notification bar while active)">
+            <input type="checkbox" id="mocksOn"> Mocking active (debugger)
+          </label>
+          <span class="spacer"></span>
+          <button id="mockAdd" class="mini" type="button" title="Add a mock rule"></button>
+        </div>
+        <div id="mockList" class="mock-list"></div>
+      </div>
+    </details>
+
     <div class="row small wrap">
-      <label class="check" title="Attach chrome.debugger to active tab to capture response bodies (Chrome shows its built-in debugger notification bar on the tab while attached)">
-        <input type="checkbox" id="captureBodies"> Capture response bodies (debugger)
+      <label class="check" title="Attach chrome.debugger to the active tab to capture response bodies and WebSocket / SSE messages (Chrome shows its built-in debugger notification bar on the tab while attached)">
+        <input type="checkbox" id="captureBodies"> Capture bodies &amp; messages (debugger)
       </label>
       <label class="check" title="Auto-decode JWT tokens found in request/response headers">
         <input type="checkbox" id="decodeJwtToggle"> Decode JWT in headers

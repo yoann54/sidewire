@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sidewire",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Log network requests in a side panel without opening DevTools.",
   "minimum_chrome_version": "116",
   "permissions": ["webRequest", "sidePanel", "storage"],

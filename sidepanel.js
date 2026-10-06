@@ -125,6 +125,9 @@ const state = {
   groupByDomain: false,
   collapsedHosts: new Set(),
   diffSelection: [],
+  openFrames: new Set(),
+  mocks: [],
+  mocksOn: false,
   dropped: 0
 };
 
@@ -158,6 +161,11 @@ const els = {
   counts: document.getElementById("counts"),
   themeToggle: document.getElementById("themeToggle"),
   donate: document.getElementById("donate"),
+  mocksPanel: document.getElementById("mocksPanel"),
+  mocksSummary: document.getElementById("mocksSummary"),
+  mocksOn: document.getElementById("mocksOn"),
+  mockAdd: document.getElementById("mockAdd"),
+  mockList: document.getElementById("mockList"),
   empty: null
 };
 
@@ -191,6 +199,8 @@ const ICONS = {
   upload: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   diff: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 9a9 9 0 01-9 9M18 9V6a2 2 0 00-2-2h-3"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>',
   heart: '<path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 10-7.8 7.8l1 1L12 21l7.8-7.8 1-1a5.5 5.5 0 000-7.8z"/>'
 };
 
@@ -513,7 +523,7 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Sidewire", version: "0.7.0" },
+      creator: { name: "Sidewire", version: "0.8.0" },
       entries: entries.map(harEntry)
     }
   };
@@ -1069,7 +1079,7 @@ function jsonNode(value, key) {
     const children = entries.map(([k, v]) => jsonNode(v, isArr ? k : k)).join("");
     return `
       <div class="jv-node">
-        <div class="jv-line jv-header">
+        <div class="jv-line jv-header" tabindex="0" role="button" aria-expanded="true">
           <span class="jv-toggle"></span>${keyHtml}<span class="jv-punct">${open}</span><span class="jv-preview"> ${label} ${close}</span>
         </div>
         <div class="jv-children">${children}</div>
@@ -1149,6 +1159,7 @@ function buildDetail(e) {
 
   const replayResult = state.replays.get(e.id);
   const replaySection = replayResult ? renderReplay(replayResult) : "";
+  const isStream = e.type === "websocket" || e.frameCount > 0;
 
   const editorOpen = state.replayWithOpen.has(e.id);
   wrap.innerHTML = `
@@ -1161,8 +1172,11 @@ function buildDetail(e) {
       <button class="mini" data-action="replay">${icon("play")}<span>Replay</span></button>
       <button class="mini ${editorOpen ? "active" : ""}" data-action="replay-with">${icon("pencil")}<span>Replay with…</span></button>
       <button class="mini ${state.diffSelection.includes(e.id) ? "active" : ""}" data-action="diff">${icon("diff")}<span>${state.diffSelection.includes(e.id) ? "Selected" : "Diff"}</span></button>
+      <button class="mini" data-action="mock" title="Create a mock rule that answers this URL with this response">${icon("zap")}<span>Mock</span></button>
     </div>
+    ${e.mock ? mockNoteHtml(e.mock) : ""}
     ${editorOpen ? buildReplayEditor(e) : ""}
+    ${isStream ? renderFramesSection(e) : ""}
     ${section("URL", e.url, `<div class="code">${escapeHtml(e.url)}</div>`)}
     ${section("Query parameters", queryText, kvList(queryRows))}
     ${section("Request headers", reqHeadersText, renderHeadersList(e.requestHeaders))}
@@ -1199,6 +1213,9 @@ function buildDetail(e) {
     state.replays.set(e.id, result);
     renderList(e.id);
   });
+  wrap.querySelector('[data-action="mock"]').addEventListener("click", () => {
+    mockFromEntry(e);
+  });
   wrap.querySelector('[data-action="replay-with"]').addEventListener("click", () => {
     if (state.replayWithOpen.has(e.id)) state.replayWithOpen.delete(e.id);
     else state.replayWithOpen.add(e.id);
@@ -1224,10 +1241,88 @@ function buildDetail(e) {
   wrap.addEventListener("click", (ev) => {
     const header = ev.target.closest(".jv-header");
     if (header && wrap.contains(header) && !window.getSelection()?.toString()) {
-      header.parentElement.classList.toggle("collapsed");
+      toggleJsonNode(header);
     }
   });
+  wrap.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    if (!ev.target.classList.contains("jv-header")) return;
+    ev.preventDefault();
+    toggleJsonNode(ev.target);
+  });
+  // <details> state of each message survives the row being rebuilt.
+  wrap.addEventListener("toggle", (ev) => {
+    const n = ev.target.dataset?.frame;
+    if (n == null) return;
+    const key = `${e.id}:${n}`;
+    if (ev.target.open) state.openFrames.add(key);
+    else state.openFrames.delete(key);
+  }, true);
   return wrap;
+}
+
+function toggleJsonNode(header) {
+  const collapsed = header.parentElement.classList.toggle("collapsed");
+  header.setAttribute("aria-expanded", String(!collapsed));
+}
+
+const MOCK_ACTION_LABELS = { fulfill: "MOCK", delay: "DELAYED", fail: "BLOCKED" };
+
+function mockNoteHtml(mock) {
+  const rule = state.mocks.find((m) => m.id === mock.ruleId);
+  const what = mock.action === "fail" ? "blocked"
+    : mock.action === "delay" ? "delayed"
+    : "answered locally — this is not the server's response";
+  const pattern = rule ? ` <code>${escapeHtml(rule.pattern)}</code>` : " (since deleted)";
+  return `<div class="mock-note">${icon("zap")}<span>Matched mock rule${pattern}: ${what}.</span></div>`;
+}
+
+// ─── WebSocket / SSE messages ────────────────────────────────────────────
+
+const MAX_FRAMES = 500;
+const FRAMES_SHOWN = 100;
+const WS_OPCODES = { 2: "binary", 8: "close", 9: "ping", 10: "pong" };
+
+function frameText(f) {
+  if (WS_OPCODES[f.opcode] === "binary") return decodeBase64Text(f.data).text ?? f.data;
+  return f.data;
+}
+
+function renderFramesSection(e) {
+  const frames = e.frames || [];
+  if (!frames.length) {
+    const hint = !state.captureBodies
+      ? "Enable “Capture bodies & messages” to see WebSocket / SSE messages"
+      : e.frameCount ? "Messages received before the panel opened were not kept" : "No messages yet";
+    return section("Messages", "", `<div class="kv-empty">${escapeHtml(hint)}</div>`);
+  }
+  // Newest first, so live traffic shows up right under the toolbar.
+  const shown = frames.slice(-FRAMES_SHOWN).reverse();
+  const t0 = frames[0].t;
+  const rows = shown.map((f) => {
+    const arrow = f.dir === "out" ? "↑" : f.dir === "in" ? "↓" : "⚠";
+    const kind = WS_OPCODES[f.opcode] || f.event || "";
+    const text = frameText(f);
+    const preview = text.replace(/\s+/g, " ").slice(0, 200);
+    const full = tryPrettyJson(text) || text;
+    const open = state.openFrames.has(`${e.id}:${f.n}`) ? " open" : "";
+    return `
+      <details class="frame ${f.dir}" data-frame="${f.n}"${open}>
+        <summary>
+          <span class="frame-dir" title="${f.dir === "out" ? "Sent" : f.dir === "in" ? "Received" : "Error"}">${arrow}</span>
+          <span class="frame-time">+${((f.t - t0) / 1000).toFixed(3)}s</span>
+          ${kind ? `<span class="frame-kind">${escapeHtml(kind)}</span>` : ""}
+          <span class="frame-preview">${escapeHtml(preview)}</span>
+          <span class="frame-size">${escapeHtml(formatBytes(f.size))}${f.truncated ? " (truncated)" : ""}</span>
+        </summary>
+        <pre class="code">${escapeHtml(full)}</pre>
+      </details>`;
+  }).join("");
+  const total = e.frameCount || frames.length;
+  const note = total > shown.length
+    ? `<div class="kv-empty">Showing the latest ${shown.length} of ${total} messages</div>` : "";
+  const copyValue = frames.map((f) => `${f.dir === "out" ? ">" : "<"} ${frameText(f)}`).join("\n");
+  return section(`Messages (${total})`, copyValue, `<div class="frames">${rows}</div>${note}`);
 }
 
 function renderReplay(r) {
@@ -1333,7 +1428,7 @@ function entryRow(e) {
     <span class="star" role="button" tabindex="0" aria-pressed="${isStarred}" aria-label="Star (kept across Clear)" title="Star (kept across Clear)">${icon(isStarred ? "star-filled" : "star-empty")}</span>
     <span class="method ${escapeHtml(e.method)}" data-tip-method="${escapeHtml(e.method)}">${escapeHtml(e.method)}</span>
     <span class="status ${sb ? "s" + sb : ""}" data-tip-status="${escapeHtml(e.id)}">${escapeHtml(statusText)}</span>
-    <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}</span>
+    <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}${e.frameCount ? `<span class="frame-count">${e.frameCount} msg</span>` : ""}${e.mock ? `<span class="mock-badge" title="Matched a mock rule">${MOCK_ACTION_LABELS[e.mock.action] || "MOCK"}</span>` : ""}</span>
     ${wfCell}
     ${sizeCell}
     <span class="duration">${e.duration != null ? e.duration + "ms" : ""}</span>
@@ -1457,7 +1552,16 @@ function renderList(changedId, retry = false) {
       if (wasAtBottom && state.expandedIds.size === 0) els.list.scrollTop = els.list.scrollHeight;
     } else {
       const frag = document.createDocumentFragment();
-      for (const e of visible) frag.appendChild(cachedRow(e));
+      // A page load (main_frame request) starts a new section, even when the
+      // main_frame row itself is filtered out.
+      const shown = new Set(visible);
+      let nav = null;
+      for (const e of state.entries) {
+        if (e.type === "main_frame") nav = e;
+        if (!shown.has(e)) continue;
+        if (nav) { frag.appendChild(navSeparator(nav)); nav = null; }
+        frag.appendChild(cachedRow(e));
+      }
       els.list.appendChild(frag);
       if (wasAtBottom && state.expandedIds.size === 0) {
         els.list.scrollTop = els.list.scrollHeight;
@@ -1470,6 +1574,14 @@ function renderList(changedId, retry = false) {
       (state.paused ? " · PAUSED" : "");
     updateDiffButton();
   });
+}
+
+function navSeparator(e) {
+  const li = document.createElement("li");
+  li.className = "nav-sep";
+  const time = e.startedAt ? new Date(e.startedAt).toLocaleTimeString() : "";
+  li.innerHTML = `${icon("refresh")}<span class="nav-sep-url" title="${escapeHtml(e.url)}">${escapeHtml(shortUrl(e.url))}</span><span class="nav-sep-time">${escapeHtml(time)}</span>`;
+  return li;
 }
 
 function focusedListTarget() {
@@ -1673,6 +1785,7 @@ function handlePortMessage(msg) {
     state.scope = msg.scope;
     state.captureBodies = !!msg.captureBodies;
     if (typeof msg.dropped === "number") state.dropped = msg.dropped;
+    receiveMocks(msg.mocks, msg.mocksOn);
     syncControls();
     refreshDomainOptions();
     renderList();
@@ -1690,6 +1803,16 @@ function handlePortMessage(msg) {
     state.replayDrafts = new Map([...state.replayDrafts].filter(([id]) => state.byId.has(id)));
     state.decodedBase64 = new Set([...state.decodedBase64].filter((id) => state.byId.has(id)));
     renderList();
+  } else if (msg.type === "frame") {
+    const e = state.byId.get(msg.id);
+    if (!e) return;
+    if (!e.frames) e.frames = [];
+    e.frames.push(msg.frame);
+    if (e.frames.length > MAX_FRAMES) e.frames.splice(0, e.frames.length - MAX_FRAMES);
+    e.frameCount = msg.frame.n;
+    renderList(e.id);
+  } else if (msg.type === "mocks") {
+    receiveMocks(msg.mocks, state.mocksOn);
   } else if (msg.type === "starred") {
     state.starred = new Set(msg.ids || []);
     renderList();
@@ -1697,7 +1820,9 @@ function handlePortMessage(msg) {
     state.paused = msg.paused;
     state.scope = msg.scope;
     state.captureBodies = !!msg.captureBodies;
+    receiveMocks(null, msg.mocksOn);
     if (msg.detachReason) console.info("debugger detached:", msg.detachReason);
+    if (msg.debuggerError) flashDebuggerError();
     syncControls();
     renderList();
   }
@@ -1873,6 +1998,234 @@ els.diffBtn.addEventListener("click", () => {
   state.diffSelection = [];
   renderList();
 });
+
+// ─── mocks ───────────────────────────────────────────────────────────────
+// Rules are owned by the background (it intercepts requests with CDP Fetch);
+// the panel edits a local copy and pushes the whole list back, debounced.
+
+const MOCK_METHODS = ["", ...METHODS];
+// Not copied into a rule made from a captured response: transport/framing
+// headers that would be wrong for the mocked body, and per-response noise.
+const MOCK_SKIPPED_HEADERS = new Set([
+  "content-length", "content-encoding", "transfer-encoding",
+  "connection", "keep-alive", "date"
+]);
+
+// `debugger` is optional: ask for it on first use. Must be the first await of
+// a user gesture.
+async function ensureDebuggerPermission() {
+  try { return await chrome.permissions.request({ permissions: ["debugger"] }); }
+  catch { return false; }
+}
+
+function newMockId() {
+  return crypto.randomUUID();
+}
+
+function blankMock() {
+  return {
+    id: newMockId(),
+    enabled: true,
+    pattern: "",
+    method: "",
+    action: "fulfill",
+    status: 200,
+    headers: [
+      { name: "Content-Type", value: "application/json" },
+      { name: "Access-Control-Allow-Origin", value: "*" }
+    ],
+    body: "{}",
+    delay: 2000
+  };
+}
+
+function mockFromEntry(e) {
+  // Kick off the permission prompt before anything else (user gesture).
+  const granted = ensureDebuggerPermission();
+  let pattern = e.url;
+  try { const u = new URL(e.url); pattern = u.origin + u.pathname; } catch { /* keep full url */ }
+  const body = e.responseBody && !e.responseBody.omitted
+    ? (e.responseBody.base64Encoded ? (decodeBase64Text(e.responseBody.text).text ?? "") : e.responseBody.text)
+    : "";
+  const rule = {
+    ...blankMock(),
+    pattern,
+    method: e.method === "OPTIONS" ? "OPTIONS" : e.method,
+    status: e.status || 200,
+    headers: (e.responseHeaders || [])
+      .filter((h) => !MOCK_SKIPPED_HEADERS.has(h.name.toLowerCase()))
+      .map((h) => ({ name: h.name, value: h.value ?? "" })),
+    body: tryPrettyJson(body) || body
+  };
+  granted.then((ok) => {
+    if (!ok) return;
+    state.mocks.push(rule);
+    pushMocks(true);
+    setMocksOn(true);
+    els.mocksPanel.open = true;
+    renderMockList();
+    const card = els.mockList.querySelector(`[data-mock="${CSS.escape(rule.id)}"]`);
+    card?.scrollIntoView({ block: "nearest" });
+    card?.querySelector('[data-mf="pattern"]')?.focus();
+  });
+}
+
+let pushMocksTimer = null;
+function pushMocks(now) {
+  clearTimeout(pushMocksTimer);
+  const send = () => safePost({ type: "setMocks", mocks: state.mocks });
+  if (now) send(); else pushMocksTimer = setTimeout(send, 300);
+  updateMocksSummary();
+}
+
+function setMocksOn(value) {
+  state.mocksOn = value;
+  els.mocksOn.checked = value;
+  safePost({ type: "setMocksOn", value });
+  updateMocksSummary();
+}
+
+function receiveMocks(mocks, mocksOn) {
+  state.mocksOn = !!mocksOn;
+  els.mocksOn.checked = state.mocksOn;
+  if (Array.isArray(mocks)) {
+    state.mocks = mocks.map((m) => ({ ...m, headers: (m.headers || []).map((h) => ({ ...h })) }));
+    // Don't rebuild under the user's cursor: what they're typing is newer.
+    if (!els.mockList.contains(document.activeElement)) renderMockList();
+  }
+  updateMocksSummary();
+}
+
+function activeMockCount() {
+  return state.mocks.filter((m) => m.enabled && m.pattern.trim()).length;
+}
+
+function updateMocksSummary() {
+  const n = activeMockCount();
+  els.mocksSummary.textContent = state.mocks.length
+    ? `Mocks · ${n} rule${n === 1 ? "" : "s"} ${state.mocksOn ? "active" : "(off)"}`
+    : "Mocks";
+  els.mocksPanel.classList.toggle("live", state.mocksOn && n > 0);
+}
+
+function headersToText(headers) {
+  return headers.map((h) => `${h.name}: ${h.value}`).join("\n");
+}
+
+function textToHeaders(text) {
+  return text.split("\n").map((line) => {
+    const i = line.indexOf(":");
+    if (i <= 0) return null;
+    return { name: line.slice(0, i).trim(), value: line.slice(i + 1).trim() };
+  }).filter((h) => h && h.name);
+}
+
+function mockCardHtml(m) {
+  const methodOpts = MOCK_METHODS.map((v) =>
+    `<option value="${v}"${m.method === v ? " selected" : ""}>${v || "Any"}</option>`).join("");
+  const actionOpts = [["fulfill", "Respond with"], ["delay", "Delay"], ["fail", "Fail"]].map(([v, l]) =>
+    `<option value="${v}"${m.action === v ? " selected" : ""}>${l}</option>`).join("");
+  let detail = "";
+  if (m.action === "fulfill") {
+    detail = `
+      <label class="mock-field">Status <input type="number" data-mf="status" min="100" max="599" value="${m.status}"></label>
+      <label class="mock-label">Headers <span class="mock-hint">one “Name: value” per line</span></label>
+      <textarea class="rw-body mock-headers" data-mf="headers" rows="3" spellcheck="false">${escapeHtml(headersToText(m.headers))}</textarea>
+      <label class="mock-label">Body</label>
+      <textarea class="rw-body" data-mf="body" rows="6" spellcheck="false">${escapeHtml(m.body)}</textarea>`;
+  } else if (m.action === "delay") {
+    detail = `<label class="mock-field">Wait <input type="number" data-mf="delay" min="0" max="30000" step="100" value="${m.delay}"> ms, then send the real request</label>`;
+  } else {
+    detail = `<div class="mock-hint">The request fails with net::ERR_BLOCKED_BY_CLIENT.</div>`;
+  }
+  return `
+    <div class="mock-rule${m.enabled ? "" : " disabled"}" data-mock="${escapeHtml(m.id)}">
+      <div class="mock-line">
+        <input type="checkbox" data-mf="enabled" ${m.enabled ? "checked" : ""} title="Rule enabled" aria-label="Rule enabled">
+        <select data-mf="method" aria-label="Method">${methodOpts}</select>
+        <input type="text" data-mf="pattern" value="${escapeHtml(m.pattern)}" placeholder="URL contains… or /regex/" aria-label="URL pattern" spellcheck="false">
+        <select data-mf="action" aria-label="Action">${actionOpts}</select>
+        <button class="mini rw-param-remove" data-mf="remove" title="Delete rule" aria-label="Delete rule">${icon("close")}</button>
+      </div>
+      ${detail}
+    </div>`;
+}
+
+function renderMockList() {
+  els.mockList.innerHTML = state.mocks.length
+    ? state.mocks.map(mockCardHtml).join("")
+    : `<div class="kv-empty">No rules. Use “Mock” on a request, or + Rule.</div>`;
+  updateMocksSummary();
+}
+
+function mockOf(el) {
+  const card = el.closest("[data-mock]");
+  return card ? state.mocks.find((m) => m.id === card.dataset.mock) : null;
+}
+
+els.mockList.addEventListener("input", (ev) => {
+  const t = ev.target;
+  const m = mockOf(t);
+  if (!m) return;
+  const f = t.dataset.mf;
+  if (f === "pattern") m.pattern = t.value;
+  else if (f === "status") m.status = Number(t.value) || 200;
+  else if (f === "delay") m.delay = Number(t.value) || 0;
+  else if (f === "headers") m.headers = textToHeaders(t.value);
+  else if (f === "body") m.body = t.value;
+  else return;
+  pushMocks(false);
+});
+els.mockList.addEventListener("change", (ev) => {
+  const t = ev.target;
+  const m = mockOf(t);
+  if (!m) return;
+  const f = t.dataset.mf;
+  if (f === "enabled") {
+    m.enabled = t.checked;
+    t.closest(".mock-rule").classList.toggle("disabled", !m.enabled);
+  } else if (f === "method") m.method = t.value;
+  else if (f === "action") {
+    m.action = t.value;
+    renderMockList();
+    els.mockList.querySelector(`[data-mock="${CSS.escape(m.id)}"] [data-mf="action"]`)?.focus();
+  } else return;
+  pushMocks(true);
+});
+els.mockList.addEventListener("click", (ev) => {
+  const t = ev.target.closest('[data-mf="remove"]');
+  if (!t) return;
+  const m = mockOf(t);
+  state.mocks = state.mocks.filter((x) => x !== m);
+  renderMockList();
+  pushMocks(true);
+  renderList(); // rows matched by this rule lose their rule pattern
+});
+els.mockAdd.innerHTML = `${icon("plus")}<span>Rule</span>`;
+els.mockAdd.addEventListener("click", async () => {
+  if (!(await ensureDebuggerPermission())) return;
+  const rule = blankMock();
+  state.mocks.push(rule);
+  renderMockList();
+  pushMocks(true);
+  if (!state.mocksOn) setMocksOn(true);
+  els.mockList.querySelector(`[data-mock="${CSS.escape(rule.id)}"] [data-mf="pattern"]`)?.focus();
+});
+els.mocksOn.addEventListener("change", async () => {
+  if (els.mocksOn.checked && !(await ensureDebuggerPermission())) {
+    els.mocksOn.checked = false;
+    return;
+  }
+  setMocksOn(els.mocksOn.checked);
+});
+renderMockList();
+
+function flashDebuggerError() {
+  els.counts.dataset.error = "Couldn't attach the debugger to this tab (chrome:// pages, the Web Store and other extensions can't be inspected).";
+  els.counts.classList.add("has-error");
+  clearTimeout(flashDebuggerError.timer);
+  flashDebuggerError.timer = setTimeout(() => els.counts.classList.remove("has-error"), 5000);
+}
 
 // ─── hotkeys ─────────────────────────────────────────────────────────────
 
