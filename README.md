@@ -31,6 +31,7 @@ Chrome extension that logs network requests in a side panel — without opening 
 - **WebSocket / SSE messages** — with body capture on, sent/received WebSocket frames and Server-Sent Events are listed under the connection's row (newest first, click a message for the full payload, JSON pretty-printed); the row shows a message count
 - **Mocks** — rules that intercept matching requests in the active tab (CDP `Fetch` domain): *Respond with* a custom status/headers/body, *Delay* the real request, or *Fail* it. URL pattern uses the filter syntax (substring or `/regex/`), optionally restricted to a method. **Mock** on a captured request pre-fills a rule with its URL and response. Rules are saved; the "Mocking active" master switch is per browser session. Mocked rows get a MOCK / DELAYED / BLOCKED badge
 - **Error badge** on the toolbar icon: number of failed requests (4xx/5xx/network errors) on the current page, reset on navigation, even with the panel closed
+- **Redirect chains** — each hop of a redirect (301/302/307/…) is its own row with a `→ target` badge; the detail lists the whole chain (click a hop to jump to it)
 - **Navigation separators** — a line marks each page load in the list
 - **Persistence** — buffer kept in `chrome.storage.session`, survives service worker restarts
 - **Hotkeys**: `/` focus URL filter, `Esc` clear filter, `p` pause/resume, `↑`/`↓` between rows, `Enter`/`Space` to expand rows and JSON tree nodes

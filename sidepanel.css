@@ -1029,6 +1029,51 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible {
 }
 .mock-note code { font-family: var(--font-mono); color: var(--fg); }
 
+/* ───── Redirects: row badge + chain in the detail ───── */
+.redirect-badge {
+  font-size: 9px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--s3-fg);
+  background: var(--s3-bg);
+}
+.redirect-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.redirect-hop {
+  display: grid;
+  grid-template-columns: 52px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 3px var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+button.redirect-hop { cursor: pointer; }
+button.redirect-hop:hover { background: var(--surface-hover); }
+.redirect-hop.current { border-color: var(--border-strong); background: var(--surface-3); }
+.redirect-hop.missing { color: var(--fg-faint); grid-template-columns: minmax(0, 1fr) auto; }
+.redirect-url {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.redirect-note { font-size: 10px; font-style: italic; }
+
 /* ───── Mocks panel (header) ───── */
 .mocks.live > summary { color: var(--c-orange); font-weight: 600; }
 .mocks-body { max-height: 45vh; overflow-y: auto; margin-top: var(--sp-1); }

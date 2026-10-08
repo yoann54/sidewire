@@ -498,7 +498,7 @@ function harEntry(e) {
         mimeType,
         text: e.responseBody?.text || ""
       },
-      redirectURL: getHeader(e.responseHeaders, "location") || "",
+      redirectURL: e.redirectUrl || getHeader(e.responseHeaders, "location") || "",
       headersSize: -1,
       bodySize: -1
     },
@@ -523,7 +523,7 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Sidewire", version: "0.8.0" },
+      creator: { name: "Sidewire", version: "0.8.1" },
       entries: entries.map(harEntry)
     }
   };
@@ -1175,6 +1175,7 @@ function buildDetail(e) {
       <button class="mini" data-action="mock" title="Create a mock rule that answers this URL with this response">${icon("zap")}<span>Mock</span></button>
     </div>
     ${e.mock ? mockNoteHtml(e.mock) : ""}
+    ${e.redirectedFrom || e.redirectUrl ? renderRedirectChain(e) : ""}
     ${editorOpen ? buildReplayEditor(e) : ""}
     ${isStream ? renderFramesSection(e) : ""}
     ${section("URL", e.url, `<div class="code">${escapeHtml(e.url)}</div>`)}
@@ -1215,6 +1216,9 @@ function buildDetail(e) {
   });
   wrap.querySelector('[data-action="mock"]').addEventListener("click", () => {
     mockFromEntry(e);
+  });
+  wrap.querySelectorAll("[data-goto]").forEach((btn) => {
+    btn.addEventListener("click", () => goToEntry(btn.dataset.goto));
   });
   wrap.querySelector('[data-action="replay-with"]').addEventListener("click", () => {
     if (state.replayWithOpen.has(e.id)) state.replayWithOpen.delete(e.id);
@@ -1275,6 +1279,67 @@ function mockNoteHtml(mock) {
     : "answered locally — this is not the server's response";
   const pattern = rule ? ` <code>${escapeHtml(rule.pattern)}</code>` : " (since deleted)";
   return `<div class="mock-note">${icon("zap")}<span>Matched mock rule${pattern}: ${what}.</span></div>`;
+}
+
+// ─── Redirect chains ─────────────────────────────────────────────────────
+// Each hop is its own entry, linked by redirectedFrom / redirectTo.
+
+function redirectChain(e) {
+  const chain = [e];
+  const seen = new Set([e.id]);
+  for (let p = state.byId.get(e.redirectedFrom); p && !seen.has(p.id); p = state.byId.get(p.redirectedFrom)) {
+    chain.unshift(p);
+    seen.add(p.id);
+  }
+  for (let n = state.byId.get(e.redirectTo); n && !seen.has(n.id); n = state.byId.get(n.redirectTo)) {
+    chain.push(n);
+    seen.add(n.id);
+  }
+  return chain;
+}
+
+function renderRedirectChain(e) {
+  const chain = redirectChain(e);
+  const hops = chain.map((h) => {
+    const sb = statusBucket(h);
+    const status = h.status ?? (h.state === "error" ? "ERR" : "···");
+    const label = `<span class="method ${escapeHtml(h.method)}">${escapeHtml(h.method)}</span>`
+      + `<span class="status ${sb ? "s" + sb : ""}">${escapeHtml(String(status))}</span>`
+      + `<span class="redirect-url" title="${escapeHtml(h.url)}">${escapeHtml(h.url)}</span>`;
+    return h === e
+      ? `<li class="redirect-hop current" aria-current="true">${label}</li>`
+      : `<li><button class="redirect-hop" type="button" data-goto="${escapeHtml(h.id)}" title="Show this request">${label}</button></li>`;
+  });
+  // The last known hop redirected somewhere that wasn't captured (out of scope, paused, evicted…).
+  const last = chain[chain.length - 1];
+  if (last.redirectUrl && !state.byId.has(last.redirectTo)) {
+    hops.push(`<li class="redirect-hop missing"><span class="redirect-url" title="${escapeHtml(last.redirectUrl)}">${escapeHtml(last.redirectUrl)}</span><span class="redirect-note">not captured</span></li>`);
+  }
+  const copyValue = chain.map((h) => `${h.status ?? ""} ${h.method} ${h.url}`.trim()).join("\n")
+    + (hops.length > chain.length ? `\n→ ${last.redirectUrl}` : "");
+  return section(`Redirect chain (${hops.length})`, copyValue, `<ol class="redirect-chain">${hops.join("")}</ol>`);
+}
+
+// Row badge text: just the path when the redirect stays on the same host.
+function redirectTarget(e) {
+  try {
+    const from = new URL(e.url), to = new URL(e.redirectUrl);
+    return from.host === to.host && from.protocol === to.protocol ? to.pathname + to.search : shortUrl(e.redirectUrl);
+  } catch { return e.redirectUrl; }
+}
+
+function goToEntry(id) {
+  if (!state.byId.has(id)) return;
+  state.expandedIds.add(id);
+  renderList(id);
+  // Queued after renderList's frame, so the row exists by then.
+  requestAnimationFrame(() => {
+    const li = [...els.list.querySelectorAll(".entry")].find((x) => x.dataset.id === id);
+    const main = li?.querySelector(".row-main");
+    if (!main) return;
+    main.focus({ preventScroll: true });
+    li.scrollIntoView({ block: "nearest" });
+  });
 }
 
 // ─── WebSocket / SSE messages ────────────────────────────────────────────
@@ -1428,7 +1493,7 @@ function entryRow(e) {
     <span class="star" role="button" tabindex="0" aria-pressed="${isStarred}" aria-label="Star (kept across Clear)" title="Star (kept across Clear)">${icon(isStarred ? "star-filled" : "star-empty")}</span>
     <span class="method ${escapeHtml(e.method)}" data-tip-method="${escapeHtml(e.method)}">${escapeHtml(e.method)}</span>
     <span class="status ${sb ? "s" + sb : ""}" data-tip-status="${escapeHtml(e.id)}">${escapeHtml(statusText)}</span>
-    <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}${e.frameCount ? `<span class="frame-count">${e.frameCount} msg</span>` : ""}${e.mock ? `<span class="mock-badge" title="Matched a mock rule">${MOCK_ACTION_LABELS[e.mock.action] || "MOCK"}</span>` : ""}</span>
+    <span class="url" title="${escapeHtml(e.url)}">${fmtUrl(e.url)}${op ? `<span class="gql-op">${escapeHtml(op)}</span>` : ""}${e.frameCount ? `<span class="frame-count">${e.frameCount} msg</span>` : ""}${e.mock ? `<span class="mock-badge" title="Matched a mock rule">${MOCK_ACTION_LABELS[e.mock.action] || "MOCK"}</span>` : ""}${e.redirectUrl ? `<span class="redirect-badge" title="Redirects to ${escapeHtml(e.redirectUrl)}">→ ${escapeHtml(redirectTarget(e))}</span>` : ""}</span>
     ${wfCell}
     ${sizeCell}
     <span class="duration">${e.duration != null ? e.duration + "ms" : ""}</span>
@@ -1557,7 +1622,8 @@ function renderList(changedId, retry = false) {
       const shown = new Set(visible);
       let nav = null;
       for (const e of state.entries) {
-        if (e.type === "main_frame") nav = e;
+        // A redirected navigation is still the same page load.
+        if (e.type === "main_frame" && !e.redirectedFrom) nav = e;
         if (!shown.has(e)) continue;
         if (nav) { frag.appendChild(navSeparator(nav)); nav = null; }
         frag.appendChild(cachedRow(e));
@@ -1764,6 +1830,12 @@ function upsert(entry) {
     trackHost(entry);
   }
   renderList(entry.id);
+  // Earlier hops show the whole chain in their detail: refresh them too.
+  const seen = new Set([entry.id]);
+  for (let p = state.byId.get(entry.redirectedFrom); p && !seen.has(p.id); p = state.byId.get(p.redirectedFrom)) {
+    seen.add(p.id);
+    renderList(p.id);
+  }
 }
 
 // ─── port ────────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ title: Sidewire — Privacy Policy
 
 _Last updated: 2026-10-06_
 
-_Applies to Sidewire version 0.8.0._
+_Applies to Sidewire version 0.8.1._
 
 Sidewire is a Chrome extension that displays the network traffic of the tabs you are actively capturing inside a side panel, as a developer tool.
 

@@ -18,6 +18,9 @@ const MOCK_ACTIONS = new Set(["fulfill", "delay", "fail"]);
 const MOCK_DROPPED_HEADERS = new Set(["content-length", "content-encoding", "transfer-encoding"]);
 
 const inflight = new Map();
+// requestId → the hop that was just redirected. webRequest keeps the same
+// requestId across redirects and fires onBeforeRequest again for the target.
+const redirects = new Map();
 const log = [];
 const ports = new Set();
 const starredIds = new Set();
@@ -200,6 +203,7 @@ chrome.runtime.onConnect.addListener((port) => {
       log.length = 0;
       log.push(...kept);
       inflight.clear();
+      redirects.clear();
       droppedCount = 0;
       persist();
       broadcast({ type: "cleared", entries: log, dropped: droppedCount });
@@ -281,9 +285,11 @@ function decodeRequestBody(rb) {
 chrome.webRequest.onBeforeRequest.addListener(
   (d) => {
     if (d.type === "main_frame" && d.tabId >= 0) resetErrorCount(d.tabId);
+    const prev = redirects.get(d.requestId);
+    redirects.delete(d.requestId);
     if (!shouldCapture(d)) return;
     const entry = {
-      id: d.requestId,
+      id: prev ? `${d.requestId}~${prev.hop + 1}` : d.requestId,
       url: d.url,
       method: d.method,
       type: d.type,
@@ -300,6 +306,14 @@ chrome.webRequest.onBeforeRequest.addListener(
       responseHeaders: null,
       responseBody: null
     };
+    if (prev) {
+      entry.redirectedFrom = prev.entry.id;
+      entry.redirectHop = prev.hop + 1;
+      // 307/308 resend the body; Chrome doesn't repeat it on the new event.
+      if (!entry.requestBody && d.method === prev.entry.method) entry.requestBody = prev.entry.requestBody;
+      prev.entry.redirectTo = entry.id;
+      broadcast({ type: "update", entry: prev.entry });
+    }
     const mark = takeMockMark(entry);
     if (mark) entry.mock = mark;
     inflight.set(d.requestId, entry);
@@ -338,9 +352,32 @@ chrome.webRequest.onHeadersReceived.addListener(
   ["responseHeaders", "extraHeaders"]
 );
 
+// Close the current hop as its own entry; onBeforeRequest opens the next one.
+chrome.webRequest.onBeforeRedirect.addListener(
+  (d) => {
+    const e = inflight.get(d.requestId);
+    if (!e) return;
+    e.status = d.statusCode;
+    e.responseHeaders = d.responseHeaders || e.responseHeaders || [];
+    e.redirectUrl = d.redirectUrl;
+    e.completedAt = d.timeStamp;
+    e.duration = Math.max(0, Math.round(d.timeStamp - e.startedAt));
+    e.state = "completed";
+    // Also keeps CDP body correlation from pinning a later body on this hop.
+    e.responseBody = { text: "", base64Encoded: false, omitted: "redirect" };
+    inflight.delete(d.requestId);
+    redirects.set(d.requestId, { entry: e, hop: e.redirectHop || 0 });
+    persist();
+    broadcast({ type: "update", entry: e });
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders", "extraHeaders"]
+);
+
 chrome.webRequest.onCompleted.addListener(
   (d) => {
     if (d.statusCode >= 400) bumpErrorCount(d);
+    redirects.delete(d.requestId);
     const e = inflight.get(d.requestId);
     if (!e) return;
     e.status = d.statusCode;
@@ -360,6 +397,7 @@ chrome.webRequest.onErrorOccurred.addListener(
   (d) => {
     // Aborted requests (navigation away, cancelled fetch) aren't failures.
     if (d.error !== "net::ERR_ABORTED") bumpErrorCount(d);
+    redirects.delete(d.requestId);
     const e = inflight.get(d.requestId);
     if (!e) return;
     e.error = d.error;

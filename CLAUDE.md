@@ -43,6 +43,12 @@ Le repo distant est `git@github.com:yoann54/sidewire.git` (`origin`, `main` déj
 - `syncDebugger()` dans `background.js` décide seul d'attacher/détacher (bodies **ou** mocks) et active `Network`/`Fetch` selon le besoin
 - `store/listing.md` + `PRIVACY.md` mis à jour (nouvel usage de `debugger`) → **à recopier dans le dashboard** avant de soumettre
 
+### v0.8.1 (2026-10-08)
+- **Chaînes de redirection** : `onBeforeRedirect` termine chaque hop (status 3xx, headers, `redirectUrl`) ; le hop suivant reçoit l'id `<requestId>~N` et les entrées sont reliées par `redirectedFrom`/`redirectTo`. Corrige un bug : Chrome relance `onBeforeRequest` avec le même `requestId` → deux entrées de même id, la 1re bloquée en « pending », fusionnées par le panneau
+- Panneau : badge `→ cible` sur les lignes 3xx, section « Redirect chain » dans le détail (clic = aller au hop), une seule ligne de séparation par navigation redirigée, `redirectURL` absolu à l'export HAR
+- 307/308 : méthode + body conservés ; les bodies CDP s'attachent désormais au bon hop (corrélation par URL)
+- Aucune permission ni donnée nouvelle → `store/listing.md` inchangé
+
 ## Publication
 
 - **Publiée** sur le Chrome Web Store (ID `mkhgmicflbbhfohnkpkmcnkdjhipdfmk`), v0.6.0 en ligne au 2026-10-05
