@@ -906,10 +906,12 @@ function attachReplayEditorHandlers(root, e) {
       if (!confirmImportedReplay(e)) return;
       state.replays.set(e.id, { pending: true });
       renderList(e.id);
+      scrollToReplay(e.id);
       const url = composeUrlFromDraft(e, draft);
       const result = await replay(e, { url, body: draft.body });
       state.replays.set(e.id, result);
       renderList(e.id);
+      scrollToReplay(e.id);
     }
   });
 }
@@ -1210,9 +1212,11 @@ function buildDetail(e) {
     if (!confirmImportedReplay(e)) return;
     state.replays.set(e.id, { pending: true });
     renderList(e.id);
+    scrollToReplay(e.id);
     const result = await replay(e);
     state.replays.set(e.id, result);
     renderList(e.id);
+    scrollToReplay(e.id);
   });
   wrap.querySelector('[data-action="mock"]').addEventListener("click", () => {
     mockFromEntry(e);
@@ -1339,6 +1343,16 @@ function goToEntry(id) {
     if (!main) return;
     main.focus({ preventScroll: true });
     li.scrollIntoView({ block: "nearest" });
+  });
+}
+
+// Brings the replay result into view; the section sits below the request and
+// response details, usually out of sight.
+function scrollToReplay(id) {
+  // Queued after renderList's frame, so the section exists by then.
+  requestAnimationFrame(() => {
+    const li = [...els.list.querySelectorAll(".entry")].find((x) => x.dataset.id === id);
+    li?.querySelector(".replay-section")?.scrollIntoView({ block: "start", behavior: "smooth" });
   });
 }
 
