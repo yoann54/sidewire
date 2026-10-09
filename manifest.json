@@ -4,8 +4,7 @@
   "version": "0.8.1",
   "description": "Log network requests in a side panel without opening DevTools.",
   "minimum_chrome_version": "116",
-  "permissions": ["webRequest", "sidePanel", "storage"],
-  "optional_permissions": ["debugger"],
+  "permissions": ["webRequest", "sidePanel", "storage", "debugger"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "action": {

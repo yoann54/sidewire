@@ -29,7 +29,7 @@ Le repo distant est `git@github.com:yoann54/sidewire.git` (`origin`, `main` déj
 
 ### Audit → v0.7.0 (2026-10-05)
 - Sécurité : méthode HTTP échappée et validée à l'import HAR ; cURL/PowerShell entièrement quotés (les noms de header peuvent contenir `'` `` ` `` `$`) ; secrets masqués à l'export HAR (par défaut) ; confirmation avant replay d'une entrée importée
-- Permissions : `tabs` retirée (inutile) ; `debugger` passée en `optional_permissions`, demandée au premier clic sur « Capture response bodies » ; `minimum_chrome_version: 116`
+- Permissions : `tabs` retirée (inutile) ; `debugger` passée en `optional_permissions` — **erreur, annulée** : Chrome n'accepte pas `debugger` en optionnel (il l'ignore, `permissions.request` échoue en silence → bodies et mocks inopérants depuis 0.7.0). Remise dans `permissions` ; `minimum_chrome_version: 116`
 - Robustesse : le panneau se reconnecte seul après un redémarrage du SW ; `paused`/`scope` persistés ; restauration du buffer sans race ; attach/detach debugger sérialisés ; bodies formData ré-encodés en urlencoded pour replay/exports
 - Perf : bodies > 1 Mo et images/media/fonts non capturés ; lignes et panneau de diff mis en cache (`rowCache`, `renderList(id)` ne reconstruit que la ligne concernée) ; le panneau retire les entrées évincées par le SW
 - Accessibilité : puces méthodes/types en `<button aria-pressed>` ; lignes, étoiles et en-têtes de groupe focusables (Entrée/Espace), ↑/↓ entre les lignes, focus restauré après chaque rendu, contour `:focus-visible`. Non traité : nœuds de l'arbre JSON (clic souris uniquement)

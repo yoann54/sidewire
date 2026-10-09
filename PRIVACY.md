@@ -51,7 +51,7 @@ The "HAR import" feature reads a `.har` file you select from your local file sys
 | `webRequest` | Read request/response metadata (URL, headers, status, timings) from tabs in capture scope |
 | `sidePanel` | Render the extension's UI in Chrome's side panel |
 | `storage` | Persist the rolling buffer in `chrome.storage.session`, and UI preferences (theme, filters, display toggles) and mock rules in `chrome.storage.local` |
-| `debugger` | Optional permission, requested only when you first enable body capture or mocks — attached only while one of them is on, to read response bodies and WebSocket/SSE messages and to apply your mock rules via the Chrome DevTools Protocol |
+| `debugger` | Attached only while body capture or mocks are on, to read response bodies and WebSocket/SSE messages and to apply your mock rules via the Chrome DevTools Protocol |
 | `<all_urls>` host access | Allow the above to observe whichever site you choose to inspect |
 
 ## Third parties

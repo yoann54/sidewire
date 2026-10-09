@@ -489,9 +489,6 @@ function resetDebuggerSession() {
 
 async function attachDebuggerNow(tabId) {
   if (!tabId || tabId < 0) return false;
-  // `debugger` is an optional permission: the API only exists once granted.
-  if (!chrome.debugger) return false;
-  setupDebuggerListeners();
   try {
     if (attachedTabId !== tabId) {
       if (attachedTabId) await detachDebuggerNow();
@@ -529,26 +526,8 @@ async function detachDebuggerNow() {
   try { await chrome.debugger.detach({ tabId }); } catch {}
 }
 
-// Registered lazily: chrome.debugger is undefined until the optional
-// permission is granted (requested by the panel when the toggle is enabled).
-let debuggerListenersReady = false;
-function setupDebuggerListeners() {
-  if (debuggerListenersReady || !chrome.debugger) return;
-  debuggerListenersReady = true;
-  chrome.debugger.onEvent.addListener(onDebuggerEvent);
-  chrome.debugger.onDetach.addListener(onDebuggerDetach);
-}
-setupDebuggerListeners();
-chrome.permissions.onAdded.addListener(setupDebuggerListeners);
-chrome.permissions.onRemoved.addListener(({ permissions }) => {
-  if (!permissions?.includes("debugger")) return;
-  attachedTabId = null;
-  resetDebuggerSession();
-  captureBodies = false;
-  mocksOn = false;
-  persistState();
-  broadcastState();
-});
+chrome.debugger.onEvent.addListener(onDebuggerEvent);
+chrome.debugger.onDetach.addListener(onDebuggerDetach);
 
 async function onDebuggerEvent(source, method, params) {
   if (source.tabId !== attachedTabId) return;

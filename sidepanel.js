@@ -1221,6 +1221,9 @@ function buildDetail(e) {
   wrap.querySelector('[data-action="mock"]').addEventListener("click", () => {
     mockFromEntry(e);
   });
+  wrap.querySelector('[data-action="mock-replay"]')?.addEventListener("click", () => {
+    mockFromEntry(e, state.replays.get(e.id));
+  });
   wrap.querySelectorAll("[data-goto]").forEach((btn) => {
     btn.addEventListener("click", () => goToEntry(btn.dataset.goto));
   });
@@ -1419,7 +1422,7 @@ function renderReplay(r) {
   }
   const ct = (r.headers || []).find((h) => h.name?.toLowerCase() === "content-type")?.value || "";
   return `<section class="detail-section replay-section">
-    <header><span>Replay result · ${r.status} · ${r.duration}ms</span></header>
+    <header><span>Replay result · ${r.status} · ${r.duration}ms</span><button class="mini" data-action="mock-replay" title="Create a mock rule that answers this entry's URL with this replay response">${icon("zap")}<span>Mock this response</span></button></header>
     <div class="detail-body">
       ${kvList(r.headers.map((h) => [h.name, h.value]))}
       ${bodyHtml(r.body, ct)}
@@ -1994,19 +1997,8 @@ els.slowThreshold.addEventListener("input", () => {
   savePrefs();
   renderList();
 });
-els.captureBodies.addEventListener("change", async () => {
-  const want = els.captureBodies.checked;
-  if (want) {
-    // `debugger` is optional: ask for it on first use. Must run directly in the
-    // user gesture, before any other await.
-    let granted = false;
-    try { granted = await chrome.permissions.request({ permissions: ["debugger"] }); } catch {}
-    if (!granted) {
-      els.captureBodies.checked = false;
-      return;
-    }
-  }
-  safePost({ type: "setCaptureBodies", value: want });
+els.captureBodies.addEventListener("change", () => {
+  safePost({ type: "setCaptureBodies", value: els.captureBodies.checked });
 });
 els.copyAll.addEventListener("click", async () => {
   const urls = state.entries.filter(makeMatcher()).map((e) => e.url).join("\n");
@@ -2097,13 +2089,6 @@ const MOCK_SKIPPED_HEADERS = new Set([
   "connection", "keep-alive", "date"
 ]);
 
-// `debugger` is optional: ask for it on first use. Must be the first await of
-// a user gesture.
-async function ensureDebuggerPermission() {
-  try { return await chrome.permissions.request({ permissions: ["debugger"] }); }
-  catch { return false; }
-}
-
 function newMockId() {
   return crypto.randomUUID();
 }
@@ -2125,35 +2110,34 @@ function blankMock() {
   };
 }
 
-function mockFromEntry(e) {
-  // Kick off the permission prompt before anything else (user gesture).
-  const granted = ensureDebuggerPermission();
+// `replayed` (a replay result) supplies the response instead of the entry's own;
+// the pattern still targets the entry's URL, the one the page actually calls.
+function mockFromEntry(e, replayed) {
   let pattern = e.url;
   try { const u = new URL(e.url); pattern = u.origin + u.pathname; } catch { /* keep full url */ }
-  const body = e.responseBody && !e.responseBody.omitted
-    ? (e.responseBody.base64Encoded ? (decodeBase64Text(e.responseBody.text).text ?? "") : e.responseBody.text)
-    : "";
+  const body = replayed
+    ? replayed.body
+    : e.responseBody && !e.responseBody.omitted
+      ? (e.responseBody.base64Encoded ? (decodeBase64Text(e.responseBody.text).text ?? "") : e.responseBody.text)
+      : "";
   const rule = {
     ...blankMock(),
     pattern,
     method: e.method === "OPTIONS" ? "OPTIONS" : e.method,
-    status: e.status || 200,
-    headers: (e.responseHeaders || [])
+    status: (replayed ? replayed.status : e.status) || 200,
+    headers: ((replayed ? replayed.headers : e.responseHeaders) || [])
       .filter((h) => !MOCK_SKIPPED_HEADERS.has(h.name.toLowerCase()))
       .map((h) => ({ name: h.name, value: h.value ?? "" })),
     body: tryPrettyJson(body) || body
   };
-  granted.then((ok) => {
-    if (!ok) return;
-    state.mocks.push(rule);
-    pushMocks(true);
-    setMocksOn(true);
-    els.mocksPanel.open = true;
-    renderMockList();
-    const card = els.mockList.querySelector(`[data-mock="${CSS.escape(rule.id)}"]`);
-    card?.scrollIntoView({ block: "nearest" });
-    card?.querySelector('[data-mf="pattern"]')?.focus();
-  });
+  state.mocks.push(rule);
+  pushMocks(true);
+  setMocksOn(true);
+  els.mocksPanel.open = true;
+  renderMockList();
+  const card = els.mockList.querySelector(`[data-mock="${CSS.escape(rule.id)}"]`);
+  card?.scrollIntoView({ block: "nearest" });
+  card?.querySelector('[data-mf="pattern"]')?.focus();
 }
 
 let pushMocksTimer = null;
@@ -2288,8 +2272,7 @@ els.mockList.addEventListener("click", (ev) => {
   renderList(); // rows matched by this rule lose their rule pattern
 });
 els.mockAdd.innerHTML = `${icon("plus")}<span>Rule</span>`;
-els.mockAdd.addEventListener("click", async () => {
-  if (!(await ensureDebuggerPermission())) return;
+els.mockAdd.addEventListener("click", () => {
   const rule = blankMock();
   state.mocks.push(rule);
   renderMockList();
@@ -2297,11 +2280,7 @@ els.mockAdd.addEventListener("click", async () => {
   if (!state.mocksOn) setMocksOn(true);
   els.mockList.querySelector(`[data-mock="${CSS.escape(rule.id)}"] [data-mf="pattern"]`)?.focus();
 });
-els.mocksOn.addEventListener("change", async () => {
-  if (els.mocksOn.checked && !(await ensureDebuggerPermission())) {
-    els.mocksOn.checked = false;
-    return;
-  }
+els.mocksOn.addEventListener("change", () => {
   setMocksOn(els.mocksOn.checked);
 });
 renderMockList();

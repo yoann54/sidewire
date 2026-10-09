@@ -53,16 +53,17 @@ FEATURES
 • Copy URL, Copy as cURL, Copy as fetch, Copy as PowerShell, Copy as node fetch, Copy all visible URLs
 • HAR export and HAR import — round-trip with DevTools, Postman, Insomnia…
 • Sensitive header values (Authorization, Cookie, API keys…) redacted in exported HAR files by default
-• Mocks — answer matching requests with your own status, headers and body, delay them, or make them fail; create a rule from any captured request in one click (uses chrome.debugger, optional permission)
+• Mocks — answer matching requests with your own status, headers and body, delay them, or make them fail; create a rule from any captured request in one click (uses chrome.debugger)
 • WebSocket and Server-Sent Events messages listed under each connection (with response-body capture on)
 • Error badge on the toolbar icon: failed requests (4xx/5xx/network errors) on the current page, reset on navigation
 • Navigation separators mark each page load in the list
+• Redirect chains — each hop of a redirect (301/302/307/308…) is shown as its own row with its status and target; the request details list the whole chain, and a click jumps to any hop
 • Replay — re-fire a captured request and see the response inline
 • Replay with… — open an inline editor to toggle/edit/add query parameters and edit the body (JSON pretty-print) before re-firing
 • Decode base64 response bodies in one click; JSON pretty-printed automatically when decoded
 • Optional JWT decoding — auto-shows the decoded header/payload JSON under any JWT-shaped header value (Authorization: Bearer …, etc.)
 • Light / dark theme — toggle in the title bar, follows OS preference by default
-• Optional response-body capture via chrome.debugger — the permission is only requested when you first turn on body capture or mocks (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
+• Optional response-body capture via chrome.debugger — only attached while body capture or mocks are on (Chrome shows its built-in debugger notification bar on the inspected tab while attached)
 • Filters and display preferences are remembered between sessions
 • Persistence — request buffer kept in chrome.storage.session, survives service-worker restarts (response bodies stay in memory only, never written to storage)
 • Keyboard: / focus URL filter, Esc clear filter, P pause/resume, arrow keys between rows, Enter/Space to expand rows and JSON nodes
@@ -111,12 +112,12 @@ Used to persist the request buffer in chrome.storage.session so that the side pa
 
 ### `debugger`
 ```
-Declared as an optional permission: it is not granted at install time and is requested through chrome.permissions.request only when the user first enables a feature that needs it ("Capture bodies & messages" or "Mocks"). The debugger is attached to the active tab only while one of these features is on, for two uses: (1) reading response bodies and WebSocket / Server-Sent Events messages (Network domain), which Chrome's webRequest API does not expose; (2) answering, delaying or failing requests that match mock rules the user wrote (Fetch domain) — webRequest in Manifest V3 cannot modify responses. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when both features are turned off; dismissing the notification bar turns them off.
+Never used by default: the debugger is attached to the active tab only while the user has turned on "Capture bodies & messages" or "Mocks", for two uses: (1) reading response bodies and WebSocket / Server-Sent Events messages (Network domain), which Chrome's webRequest API does not expose; (2) answering, delaying or failing requests that match mock rules the user wrote (Fetch domain) — webRequest in Manifest V3 cannot modify responses. Chrome's built-in debugger notification bar is displayed on the inspected tab for as long as the debugger session is active, so the user is always aware. Detached automatically when both features are turned off; dismissing the notification bar turns them off.
 ```
 
 ### Host permissions: `<all_urls>`
 ```
-Network capture must be able to observe requests across whatever site the user is browsing — there is no way to know in advance which origin the user wants to inspect. The extension does not inject content scripts and does not read page DOM; <all_urls> is used solely to scope the webRequest listener and the optional debugger attach.
+Network capture must be able to observe requests across whatever site the user is browsing — there is no way to know in advance which origin the user wants to inspect. The extension does not inject content scripts and does not read page DOM; <all_urls> is used solely to scope the webRequest listener and the user-enabled debugger attach.
 ```
 
 ---
