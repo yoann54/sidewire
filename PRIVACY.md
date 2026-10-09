@@ -21,7 +21,7 @@ While you have capture enabled, Sidewire reads the following from the tabs in sc
 - Request URL, method, resource type, status code, timings
 - Request and response headers
 - Request body (form data or raw, when present)
-- Response body and WebSocket / Server-Sent Events messages — **only** when you explicitly enable the "Capture bodies & messages (debugger)" toggle, which attaches `chrome.debugger` to the active tab. The `debugger` permission is not granted at install time: Chrome asks you for it the first time you enable a feature that needs it. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
+- Response body and WebSocket / Server-Sent Events messages — **only** when you explicitly enable the "Capture bodies & messages (debugger)" toggle, which attaches `chrome.debugger` to the active tab. While attached, Chrome shows its built-in debugger notification bar on the inspected tab so you remain aware that a debugger session is active.
 - Requests matching a mock rule — **only** while "Mocking active" is on. The debugger is then used to answer, delay or fail those requests locally, as your rules describe. Nothing is sent anywhere: a mocked response is produced inside your browser.
 
 This is the same kind of information you would see in Chrome's built-in DevTools Network panel.
