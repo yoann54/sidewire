@@ -49,6 +49,12 @@ Le repo distant est `git@github.com:yoann54/sidewire.git` (`origin`, `main` déj
 - 307/308 : méthode + body conservés ; les bodies CDP s'attachent désormais au bon hop (corrélation par URL)
 - Aucune permission ni donnée nouvelle → `store/listing.md` inchangé
 
+### v0.8.2 (2026-10-09)
+- **Correctif** : `debugger` remis dans `permissions` (Chrome refuse cette permission en `optional_permissions` → bodies et mocks inopérants depuis 0.7.0)
+- Scroll automatique vers le résultat d'un replay
+- Bouton « Mock this response » sur le résultat d'un replay : règle sur l'URL d'origine de l'entrée, avec la réponse du replay
+- `store/listing.md` + `PRIVACY.md` : mentions « permission optionnelle » retirées → **justification `debugger` à recopier dans le dashboard**
+
 ## Publication
 
 - **Publiée** sur le Chrome Web Store (ID `mkhgmicflbbhfohnkpkmcnkdjhipdfmk`), v0.6.0 en ligne au 2026-10-05

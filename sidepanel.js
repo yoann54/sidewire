@@ -523,7 +523,7 @@ function buildHAR(entries) {
   return {
     log: {
       version: "1.2",
-      creator: { name: "Sidewire", version: "0.8.1" },
+      creator: { name: "Sidewire", version: "0.8.2" },
       entries: entries.map(harEntry)
     }
   };
